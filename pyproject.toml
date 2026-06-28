@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=70", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dafit-open"
+version = "0.1.0"
+description = "Clean-room BLE experiments for Da Fit compatible watches"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "bleak>=0.22",
+]
+
+[project.scripts]
+dafit-open = "dafit_open.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

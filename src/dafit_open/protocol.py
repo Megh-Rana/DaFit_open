@@ -1,0 +1,104 @@
+"""Packet framing and GATT constants inferred from observed app behavior."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+
+BLUETOOTH_BASE_SUFFIX = "-0000-1000-8000-00805f9b34fb"
+
+
+def short_uuid(value: str) -> str:
+    """Expand a 16-bit BLE UUID to the canonical 128-bit form."""
+    return f"0000{value.lower()}{BLUETOOTH_BASE_SUFFIX}"
+
+
+CLIENT_CHARACTERISTIC_CONFIG = short_uuid("2902")
+
+CRP_SERVICE = short_uuid("feea")
+CRP_NOTIFY_PRIMARY = short_uuid("fee1")
+CRP_WRITE_PRIMARY = short_uuid("fee2")
+CRP_NOTIFY_SECONDARY = short_uuid("fee3")
+CRP_WRITE_CMD_1 = short_uuid("fee5")
+CRP_WRITE_CMD_2 = short_uuid("fee6")
+CRP_NOTIFY_EXT_1 = short_uuid("fee7")
+CRP_NOTIFY_EXT_2 = short_uuid("fee8")
+CRP_HISILICON = short_uuid("fee9")
+
+BATTERY_SERVICE = short_uuid("180f")
+BATTERY_LEVEL = short_uuid("2a19")
+DEVICE_INFO_SERVICE = short_uuid("180a")
+FIRMWARE_REVISION = short_uuid("2a28")
+MANUFACTURER_NAME = short_uuid("2a29")
+MODEL_NUMBER = short_uuid("2a24")
+HEART_RATE_SERVICE = short_uuid("180d")
+HEART_RATE_MEASUREMENT = short_uuid("2a37")
+
+ALT_SERVICE_3802 = short_uuid("3802")
+ALT_CHARACTERISTIC_4A02 = short_uuid("4a02")
+
+
+HEADER = bytes([0xFE, 0xEA])
+
+
+@dataclass(frozen=True)
+class Packet:
+    command: int
+    payload: bytes = b""
+    mtu_payload: int = 20
+
+    def build(self) -> bytes:
+        return build_packet(self.command, self.payload, self.mtu_payload)
+
+
+def build_packet(command: int, payload: bytes = b"", mtu_payload: int = 20) -> bytes:
+    """Build the common CRP command frame.
+
+    Frame shape:
+        FE EA flags length command payload...
+
+    For default 20-byte BLE payload mode, observed packets use flag 0x10.
+    For larger MTU mode, observed packets use 0x20 plus the high length byte.
+    """
+    payload = bytes(payload)
+    packet_len = len(payload) + 5
+    if packet_len > 0x0FFF:
+        raise ValueError(f"packet too large: {packet_len}")
+
+    if mtu_payload == 20:
+        flags = 0x10
+    elif packet_len > 0xFF:
+        flags = 0x20 + (packet_len >> 8)
+    else:
+        flags = 0x20
+
+    return bytes(
+        [
+            HEADER[0],
+            HEADER[1],
+            flags & 0xFF,
+            packet_len & 0xFF,
+            command & 0xFF,
+        ]
+    ) + payload
+
+
+def parse_frame_prefix(data: bytes) -> tuple[int, int, int] | None:
+    """Return `(flags, packet_len, command)` when data looks like a CRP frame."""
+    data = bytes(data)
+    if len(data) < 5 or data[:2] != HEADER:
+        return None
+    flags = data[2]
+    packet_len = data[3]
+    if flags >= 0x20:
+        packet_len |= (flags - 0x20) << 8
+    return flags, packet_len, data[4]
+
+
+def hex_bytes(data: bytes) -> str:
+    return " ".join(f"{byte:02X}" for byte in data)
+
+
+QUERY_DEVICE_VERSION = Packet(0x2E)
+QUERY_DISPLAY_WATCH_FACE = Packet(0xB4, bytes([0x00]))
+QUERY_WATCH_FACE_LIST = Packet(0xA6, bytes([0x01]))
