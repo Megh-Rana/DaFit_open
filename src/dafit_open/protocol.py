@@ -358,11 +358,19 @@ def _decode_training_series_chunk(payload: bytes) -> str | None:
     else:
         values = list(data)
     nonzero_count = sum(1 for value in values if value != 0)
+    trimmed_count = _trimmed_count(values)
     return (
         f"id={training_id} next_offset={offset} complete={complete} "
-        f"count={len(values)} nonzero_count={nonzero_count} "
+        f"count={len(values)} nonzero_count={nonzero_count} trimmed_count={trimmed_count} "
         f"values={values} payload={hex_bytes(payload)}"
     )
+
+
+def _trimmed_count(values: list[int]) -> int:
+    for index in range(len(values) - 1, -1, -1):
+        if values[index] != 0:
+            return index + 1
+    return 0
 
 
 def _find_plausible_timestamps(data: bytes) -> list[str]:

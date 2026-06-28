@@ -75,13 +75,13 @@ class ProtocolDecodeTest(unittest.TestCase):
         self.assertEqual(
             decode_frame(heart_rate),
             "history_training_heart_rate id=11 next_offset=65535 complete=True "
-            "count=1 nonzero_count=1 values=[80] payload=05 0B FF FF 50",
+            "count=1 nonzero_count=1 trimmed_count=1 values=[80] payload=05 0B FF FF 50",
         )
         self.assertIsNotNone(distance)
         self.assertEqual(
             decode_frame(distance),
             "history_training_distance id=11 next_offset=20 complete=False "
-            "count=1 nonzero_count=1 values=[4660] payload=0A 0B 00 14 34 12",
+            "count=1 nonzero_count=1 trimmed_count=1 values=[4660] payload=0A 0B 00 14 34 12",
         )
 
     def test_builds_training_series_queries(self) -> None:

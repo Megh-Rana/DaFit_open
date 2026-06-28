@@ -217,3 +217,12 @@ series for training id `11`:
 This matches the app's flow: stored training detail always fetches heart-rate
 chunks first; step and distance chunks are only requested when the watch reports
 a higher training-series support level from the `0xB2 06` path.
+
+Additional heart-rate series captures:
+
+- Training id `12`: offsets `0 -> 135 -> 270 -> 65535`; raw samples `336`,
+  non-zero samples `332`.
+- Training id `13`: offsets `0 -> 65535`; raw samples `64`, non-zero samples
+  `62`.
+- Training id `14`: offsets `0 -> 135 -> 270 -> 405 -> 540 -> 675 -> 65535`;
+  raw samples `676`, non-zero samples `672`.
