@@ -72,7 +72,7 @@ dafit-open probe D3:05:F5:F9:B3:E5 --timeout 30 --retries 1 \
   training detail.
 - `u9.l1.e(id, offset)`, `u9.l1.g(id, offset)`, and `u9.l1.c(id, offset)` send
   `0xB2` payloads `04`, `07`, and `09` for training heart-rate, step, and
-  distance chunks.
+  distance chunks. The offset is encoded as a big-endian uint16.
 
 ## Parser Routes
 
@@ -83,10 +83,10 @@ dafit-open probe D3:05:F5:F9:B3:E5 --timeout 30 --retries 1 \
 - Command `0xAB` routes to `ka.a.z(byte[])`, where payload byte `0` selects
   heart rate, blood pressure, or blood oxygen history.
 - Command `0xB8` routes to `ka.a.h(byte[])`; subcommand `3` is sleep time.
-- Command `0xB2` routes to `ka.a.a3(byte[])`, used by training history:
-  payload byte `1` parses the training list, byte `3` parses one training
-  detail, and bytes `4`, `7`, and `9` parse heart-rate, step, and distance
-  chunks.
+- Command `0xB2` routes to `ka.a.a3(byte[])`, used by training history. Payload
+  byte `1` parses the training list, byte `3` parses one training detail, and
+  bytes `5`, `8`, and `10` parse heart-rate, step, and distance responses. The
+  matching requests use payload bytes `4`, `7`, and `9`.
 
 ## FireBoltt 148 Health-Basic Capture
 
@@ -164,4 +164,31 @@ Next detail probe:
 ```bash
 dafit-open training-detail D3:05:F5:F9:B3:E5 11 12 13 14 --timeout 30 \
   --retries 1 --json-out ble-logs/fireboltt148-training-detail.json
+```
+
+## FireBoltt 148 Training-Detail Capture
+
+Observed from:
+
+```bash
+dafit-open training-detail D3:05:F5:F9:B3:E5 11 12 13 14 --timeout 30 \
+  --retries 1 --json-out ble-logs/fireboltt148-training-detail.json
+```
+
+Responses:
+
+- `id=11`: `2026-02-19T23:49:19+00:00` to `2026-02-20T00:37:01+00:00`,
+  valid time `2862`, steps `2729`, distance `2265`, calories `136`.
+- `id=12`: `2026-04-09T22:59:20+00:00` to `2026-04-09T23:54:53+00:00`,
+  valid time `1032`, steps `1040`, distance `863`, calories `52`.
+- `id=13`: `2026-04-10T10:19:32+00:00` to `2026-04-10T10:30:09+00:00`,
+  valid time `637`, steps `984`, distance `816`, calories `51`.
+- `id=14`: `2026-04-12T22:59:11+00:00` to `2026-04-13T00:51:23+00:00`,
+  valid time `6732`, steps `4542`, distance `3769`, calories `265`.
+
+Next series probe:
+
+```bash
+dafit-open training-series D3:05:F5:F9:B3:E5 11 --kind all --timeout 30 \
+  --retries 1 --json-out ble-logs/fireboltt148-training-series-11.json
 ```

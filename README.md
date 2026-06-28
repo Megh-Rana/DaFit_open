@@ -64,6 +64,7 @@ Query stored workout details after `health-history` reports training IDs:
 
 ```bash
 dafit-open training-detail AA:BB:CC:DD:EE:FF 11 12 13 14
+dafit-open training-series AA:BB:CC:DD:EE:FF 11 --kind all
 ```
 
 Set the active watch-face slot after confirming the slot list:
@@ -78,6 +79,7 @@ Save structured captures under the ignored `ble-logs/` folder:
 dafit-open device-info AA:BB:CC:DD:EE:FF --json-out ble-logs/device-info.json
 dafit-open probe AA:BB:CC:DD:EE:FF --query-set watchface-support --json-out ble-logs/watchface-support.json
 dafit-open training-detail AA:BB:CC:DD:EE:FF 11 --json-out ble-logs/training-detail-11.json
+dafit-open training-series AA:BB:CC:DD:EE:FF 11 --kind heart-rate --json-out ble-logs/training-hr-11.json
 dafit-open set-watch-face AA:BB:CC:DD:EE:FF 5 --confirm --json-out ble-logs/set-watch-face-5.json
 ```
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 
-from .ble_probe import device_info, probe, scan, set_watch_face, training_detail
+from .ble_probe import device_info, probe, scan, set_watch_face, training_detail, training_series
 
 
 def main() -> None:
@@ -77,6 +77,27 @@ def main() -> None:
     training_detail_parser.add_argument("--direct", action="store_true")
     training_detail_parser.add_argument("--json-out", help="write a structured JSON capture")
 
+    training_series_parser = subparsers.add_parser(
+        "training-series",
+        help="query stored training heart-rate, step, or distance chunks",
+    )
+    training_series_parser.add_argument("address")
+    training_series_parser.add_argument("id", type=int, help="training history id")
+    training_series_parser.add_argument(
+        "--kind",
+        choices=["all", "heart-rate", "steps", "distance"],
+        action="append",
+        default=None,
+        help="series kind to query; can be repeated",
+    )
+    training_series_parser.add_argument("--offset", type=int, default=0)
+    training_series_parser.add_argument("--timeout", type=float, default=45.0)
+    training_series_parser.add_argument("--scan-timeout", type=float, default=10.0)
+    training_series_parser.add_argument("--retries", type=int, default=3)
+    training_series_parser.add_argument("--pair", action="store_true")
+    training_series_parser.add_argument("--direct", action="store_true")
+    training_series_parser.add_argument("--json-out", help="write a structured JSON capture")
+
     args = parser.parse_args()
     if args.command == "scan":
         asyncio.run(scan(args.timeout, args.verbose))
@@ -125,6 +146,21 @@ def main() -> None:
             training_detail(
                 args.address,
                 args.ids,
+                args.timeout,
+                args.scan_timeout,
+                args.retries,
+                pair=args.pair,
+                direct=args.direct,
+                json_out=args.json_out,
+            )
+        )
+    elif args.command == "training-series":
+        asyncio.run(
+            training_series(
+                args.address,
+                args.id,
+                args.kind or ["all"],
+                args.offset,
                 args.timeout,
                 args.scan_timeout,
                 args.retries,
