@@ -314,6 +314,15 @@ The CLI command `set-watch-face` sends that packet, then sends the existing
 `0x29` display query to verify the active slot. It requires `--confirm` because
 it changes watch state.
 
+Confirmed on FireBoltt 148:
+
+- Starting active slot was `6`.
+- Sent `0x19` slot `5`: `FE EA 10 06 19 05`.
+- No separate `0x19` response was observed in this run.
+- Follow-up `0x29` query returned `FE EA 20 06 29 05`, parsed as
+  `display_watch_face=5`.
+- The watch face visibly changed on the device.
+
 ## FireBoltt 148 Device Info Capture
 
 Observed from:
