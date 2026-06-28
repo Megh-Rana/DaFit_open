@@ -120,6 +120,8 @@ def parse_frame(data: bytes) -> Frame | None:
 
 
 def decode_frame(frame: Frame) -> str | None:
+    if frame.command == 0x19 and frame.payload:
+        return f"display_watch_face_set={frame.payload[0]}"
     if frame.command == 0x2E and frame.payload:
         return f"device_version={frame.payload[0]}"
     if frame.command == 0x29 and frame.payload:
@@ -203,6 +205,13 @@ def hex_bytes(data: bytes) -> str:
     return " ".join(f"{byte:02X}" for byte in data)
 
 
+def set_display_watch_face_packet(index: int) -> Packet:
+    if not 0 <= index <= 0xFF:
+        raise ValueError(f"watch-face index must fit in one byte: {index}")
+    return Packet(0x19, bytes([index]))
+
+
+SET_DISPLAY_WATCH_FACE_COMMAND = 0x19
 QUERY_DEVICE_VERSION = Packet(0x2E)
 QUERY_DISPLAY_WATCH_FACE = Packet(0x29)
 QUERY_WATCH_FACE_LIST = Packet(0xA6, bytes([0x01]))

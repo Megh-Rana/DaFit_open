@@ -24,10 +24,12 @@ from .protocol import (
     CRP_WRITE_PRIMARY,
     HEART_RATE_MEASUREMENT,
     Packet,
+    QUERY_DISPLAY_WATCH_FACE,
     QUERY_SETS,
     decode_frame,
     hex_bytes,
     parse_frame,
+    set_display_watch_face_packet,
 )
 
 
@@ -276,6 +278,77 @@ async def device_info(
     _write_capture(json_out, capture)
 
 
+async def set_watch_face(
+    address: str,
+    index: int,
+    timeout: float = 45.0,
+    scan_timeout: float = 10.0,
+    retries: int = 3,
+    pair: bool = False,
+    direct: bool = False,
+    json_out: str | None = None,
+) -> None:
+    if not 0 <= index <= 0xFF:
+        raise ValueError(f"watch-face index must be between 0 and 255: {index}")
+
+    capture = _new_capture(
+        "set-watch-face",
+        address,
+        {
+            "index": index,
+            "timeout": timeout,
+            "scan_timeout": scan_timeout,
+            "retries": retries,
+            "pair": pair,
+            "direct": direct,
+        },
+    )
+    device: BLEDevice | str
+    if direct:
+        print(f"using direct address connection for {address}")
+        device = address
+    else:
+        found_device = await _find_device(address, scan_timeout)
+        if found_device is None:
+            print(f"device not found during {scan_timeout:.1f}s scan: {address}")
+            _write_capture(json_out, capture)
+            return
+        device = found_device
+        capture["device"] = _device_snapshot(device)
+
+    last_error: BaseException | None = None
+    for attempt in range(1, retries + 1):
+        try:
+            print(f"connecting to {_device_label(device)}, attempt {attempt}/{retries}")
+            capture["attempts"].append({"attempt": attempt, "device": _device_label(device)})
+            await _set_watch_face_device(device, index, timeout, pair=pair, capture=capture)
+            _write_capture(json_out, capture)
+            return
+        except TimeoutError as exc:
+            last_error = exc
+            print(f"connect timed out after {timeout:.1f}s")
+            capture["errors"].append({"attempt": attempt, "type": "TimeoutError", "message": str(exc)})
+        except Exception as exc:
+            last_error = exc
+            print(f"set-watch-face failed: {type(exc).__name__}: {exc}")
+            capture["errors"].append(
+                {"attempt": attempt, "type": type(exc).__name__, "message": str(exc)}
+            )
+
+        if attempt < retries:
+            await asyncio.sleep(2)
+            if not direct:
+                refreshed = await _find_device(address, scan_timeout)
+                if refreshed is not None:
+                    device = refreshed
+                    capture["device"] = _device_snapshot(refreshed)
+
+    print("set-watch-face failed after all retries")
+    if last_error is not None:
+        print(f"last error: {type(last_error).__name__}: {last_error}")
+    _write_capture(json_out, capture)
+
+
 async def _probe_device(
     device: BLEDevice | str,
     timeout: float,
@@ -322,6 +395,70 @@ async def _probe_device(
             mtu_payload=_guess_mtu_payload(client),
             query_set=query_set,
             capture=capture,
+        )
+        await asyncio.sleep(5)
+
+        for char in notify_chars:
+            await client.stop_notify(char)
+
+
+async def _set_watch_face_device(
+    device: BLEDevice | str,
+    index: int,
+    timeout: float,
+    pair: bool,
+    capture: dict[str, Any],
+) -> None:
+    async with BleakClient(device, timeout=timeout, pair=pair) as client:
+        print(f"connected: {client.is_connected}")
+        capture["connected"] = client.is_connected
+
+        services = client.services
+        write_char = None
+        write_with_response = True
+        notify_chars = []
+
+        for service in services:
+            print(f"service {service.uuid}")
+            for char in service.characteristics:
+                props = ",".join(char.properties)
+                print(f"  char {char.uuid} [{props}]")
+                uuid = char.uuid.lower()
+                if uuid == CRP_WRITE_PRIMARY and _can_write(char.properties):
+                    write_char = char
+                    write_with_response = "write" in char.properties
+                if uuid in NOTIFY_UUIDS and "notify" in char.properties:
+                    notify_chars.append(char)
+
+        capture["services"] = _services_snapshot(services)
+
+        for char in notify_chars:
+            await client.start_notify(char, _make_notification_handler(capture))
+            print(f"notify enabled: {char.uuid}")
+            capture["notifications_enabled"].append(_char_snapshot(char))
+
+        if write_char is None:
+            print("no primary write characteristic found; cannot set watch face")
+            return
+
+        print(f"setting display watch-face slot: {index}")
+        await _write_packet(
+            client,
+            write_char,
+            set_display_watch_face_packet(index),
+            write_with_response,
+            _guess_mtu_payload(client),
+            capture,
+        )
+        await asyncio.sleep(1)
+        print("verifying display watch-face slot with cmd=0x29")
+        await _write_packet(
+            client,
+            write_char,
+            QUERY_DISPLAY_WATCH_FACE,
+            write_with_response,
+            _guess_mtu_payload(client),
+            capture,
         )
         await asyncio.sleep(5)
 

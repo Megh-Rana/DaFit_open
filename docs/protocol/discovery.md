@@ -116,6 +116,7 @@ is `0x10`. In larger-MTU mode, `flags` is `0x20` plus the high length byte.
 
 Examples represented by our clean code:
 
+- Set display watch face: command `0x19`, payload `slot`.
 - Query device version: command `0x2E`, no payload.
 - Query display watch face: command `0x29`, no payload.
 - Query watch face list: command `0xA6`, payload `01`.
@@ -292,6 +293,26 @@ Observed `watchface-support` response:
   - supported values: `[64]`
 - `0xB4 00`, `0xB4 12`, `0xB4 10`, `0xB4 20`, and `0xB4 14` produced no
   response in this run.
+
+## Display Watch Face Command
+
+Decompiler references:
+
+- `y9.a.sendDisplayWatchFace(byte)` sends `a0.m(byte)`.
+- `u9.a0.m(int)` builds `a2.b(25, new byte[]{(byte) index})`.
+- Command `25` decimal is `0x19`.
+- `ka.a` routes response case `25` to the same display-watch-face callback used
+  by query responses.
+
+Clean-room packet shape:
+
+```text
+FE EA 10 06 19 <slot>
+```
+
+The CLI command `set-watch-face` sends that packet, then sends the existing
+`0x29` display query to verify the active slot. It requires `--confirm` because
+it changes watch state.
 
 ## FireBoltt 148 Device Info Capture
 

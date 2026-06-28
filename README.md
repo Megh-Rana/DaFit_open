@@ -52,11 +52,18 @@ dafit-open probe AA:BB:CC:DD:EE:FF --query-set watchface
 dafit-open probe AA:BB:CC:DD:EE:FF --query-set watchface-support
 ```
 
+Set the active watch-face slot after confirming the slot list:
+
+```bash
+dafit-open set-watch-face AA:BB:CC:DD:EE:FF 5 --confirm
+```
+
 Save structured captures under the ignored `ble-logs/` folder:
 
 ```bash
 dafit-open device-info AA:BB:CC:DD:EE:FF --json-out ble-logs/device-info.json
 dafit-open probe AA:BB:CC:DD:EE:FF --query-set watchface-support --json-out ble-logs/watchface-support.json
+dafit-open set-watch-face AA:BB:CC:DD:EE:FF 5 --confirm --json-out ble-logs/set-watch-face-5.json
 ```
 
 For Linux/BlueZ connection timeouts, keep the watch awake/nearby and try:
