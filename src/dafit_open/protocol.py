@@ -357,8 +357,10 @@ def _decode_training_series_chunk(payload: bytes) -> str | None:
         ]
     else:
         values = list(data)
+    nonzero_count = sum(1 for value in values if value != 0)
     return (
         f"id={training_id} next_offset={offset} complete={complete} "
+        f"count={len(values)} nonzero_count={nonzero_count} "
         f"values={values} payload={hex_bytes(payload)}"
     )
 

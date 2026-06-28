@@ -199,8 +199,21 @@ heart-rate request:
 
 - Request: `0xB2`, payload `04 0B 00 00`.
 - Response: `0xB2`, payload begins `05 0B 00 87 ...`.
-- Decoded: training id `11`, next offset `135`, `complete=False`, with 136
+- Decoded: training id `11`, next offset `135`, `complete=False`, with 135
   heart-rate samples in the chunk.
 
 Follow-up series probes should walk each series until the response offset is
 `65535` before starting the next series kind.
+
+The auto-following `training-series` probe then walked the full heart-rate
+series for training id `11`:
+
+- Heart-rate offset `0` -> response offset `135`, count `135`.
+- Heart-rate offset `135` -> response offset `270`, count `135`.
+- Heart-rate offset `270` -> response offset `65535`, count `18`.
+- Total heart-rate samples: `288`.
+- Step and distance requests at offset `0` did not answer within six seconds.
+
+This matches the app's flow: stored training detail always fetches heart-rate
+chunks first; step and distance chunks are only requested when the watch reports
+a higher training-series support level from the `0xB2 06` path.
