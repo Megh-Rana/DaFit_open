@@ -39,6 +39,12 @@ Probe a device:
 dafit-open probe AA:BB:CC:DD:EE:FF
 ```
 
+For Linux/BlueZ connection timeouts, keep the watch awake/nearby and try:
+
+```bash
+dafit-open probe AA:BB:CC:DD:EE:FF --timeout 60 --scan-timeout 15 --retries 5
+```
+
 The probe currently enumerates services, enables likely notification
 characteristics, and sends a couple of read-only query packets.
 

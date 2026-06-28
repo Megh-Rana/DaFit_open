@@ -17,10 +17,12 @@ def main() -> None:
 
     probe_parser = subparsers.add_parser("probe", help="connect and probe a watch")
     probe_parser.add_argument("address")
-    probe_parser.add_argument("--timeout", type=float, default=20.0)
+    probe_parser.add_argument("--timeout", type=float, default=45.0)
+    probe_parser.add_argument("--scan-timeout", type=float, default=10.0)
+    probe_parser.add_argument("--retries", type=int, default=3)
 
     args = parser.parse_args()
     if args.command == "scan":
         asyncio.run(scan(args.timeout))
     elif args.command == "probe":
-        asyncio.run(probe(args.address, args.timeout))
+        asyncio.run(probe(args.address, args.timeout, args.scan_timeout, args.retries))
