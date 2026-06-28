@@ -221,7 +221,10 @@ observations:
 - `0x2E` response on `fee3`: `FE EA 20 06 2E 01`
 - Parsed device version payload: `1`
 - `fee1` also emitted non-framed bytes: `22 01 00 F0 00 00 10 00 00`
-- `0xB4 00` display-watch-face query sent, no response observed in this run.
+- `0xB4 00` query sent, no response observed in this run. Later review showed
+  this is not the app's current-display query.
+- The app's `queryDisplayWatchFace()` sends command `0x29` with no payload.
+- The app's `queryWatchFaceScreenInfo()` sends command `0xB4` payload `14`.
 - `0xA6 01` watch-face-list query sent: `FE EA 10 06 A6 01`
 - `0xA6` response on `fee3`:
 

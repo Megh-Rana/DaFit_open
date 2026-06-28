@@ -23,6 +23,7 @@ from .protocol import (
     QUERY_DEVICE_VERSION,
     QUERY_DISPLAY_WATCH_FACE,
     QUERY_WATCH_FACE_LIST,
+    QUERY_WATCH_FACE_SCREEN,
     decode_frame,
     hex_bytes,
     parse_frame,
@@ -188,6 +189,7 @@ async def _send_queries(
         QUERY_DEVICE_VERSION,
         QUERY_DISPLAY_WATCH_FACE,
         QUERY_WATCH_FACE_LIST,
+        QUERY_WATCH_FACE_SCREEN,
     ]:
         await _write_packet(client, write_char, packet, write_with_response, mtu_payload)
         await asyncio.sleep(0.5)

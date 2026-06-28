@@ -122,6 +122,8 @@ def parse_frame(data: bytes) -> Frame | None:
 def decode_frame(frame: Frame) -> str | None:
     if frame.command == 0x2E and frame.payload:
         return f"device_version={frame.payload[0]}"
+    if frame.command == 0x29 and frame.payload:
+        return f"display_watch_face={frame.payload[0]}"
     if frame.command == 0xA6:
         slots = decode_watch_face_list(frame.payload)
         if slots is None:
@@ -130,7 +132,36 @@ def decode_frame(frame: Frame) -> str | None:
             f"index={slot.index} type={slot.kind} id={slot.watch_face_id}"
             for slot in slots
         ) + "]"
+    if frame.command == 0xB4:
+        return decode_watch_face_subcommand(frame.payload)
     return None
+
+
+def decode_watch_face_subcommand(payload: bytes) -> str | None:
+    payload = bytes(payload)
+    if not payload:
+        return None
+    subcommand = payload[0]
+    data = payload[1:]
+    if subcommand == 20 and len(data) >= 12:
+        values = [
+            data[0] + (data[1] << 8),
+            data[2] + (data[3] << 8),
+            data[4] + (data[5] << 8),
+            data[6] + (data[7] << 8),
+            data[8] + (data[9] << 8),
+            data[10] + (data[11] << 8),
+        ]
+        return (
+            "watch_face_screen="
+            f"width={values[0]} height={values[1]} corner={values[2]} "
+            f"thumb_width={values[3]} thumb_height={values[4]} thumb_corner={values[5]}"
+        )
+    if subcommand == 0 and len(data) >= 2:
+        display_index = (data[0] << 8) + data[1]
+        supported = list(data[2:])
+        return f"support_watch_faces=display_index={display_index} supported={supported}"
+    return f"watch_face_subcommand=0x{subcommand:02X} payload={hex_bytes(data)}"
 
 
 def decode_watch_face_list(payload: bytes) -> list[WatchFaceSlot] | None:
@@ -162,5 +193,6 @@ def hex_bytes(data: bytes) -> str:
 
 
 QUERY_DEVICE_VERSION = Packet(0x2E)
-QUERY_DISPLAY_WATCH_FACE = Packet(0xB4, bytes([0x00]))
+QUERY_DISPLAY_WATCH_FACE = Packet(0x29)
 QUERY_WATCH_FACE_LIST = Packet(0xA6, bytes([0x01]))
+QUERY_WATCH_FACE_SCREEN = Packet(0xB4, bytes([0x14]))
