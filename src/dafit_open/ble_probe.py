@@ -68,6 +68,33 @@ GATT_NAMES = {
     "00002a50-0000-1000-8000-00805f9b34fb": "PnP ID",
     "00002aa6-0000-1000-8000-00805f9b34fb": "Central Address Resolution",
     "00002b3a-0000-1000-8000-00805f9b34fb": "Server Supported Features",
+    "000001ff-3c17-d293-8e48-14fe2e4da212": "Auxiliary Data Service",
+    "000002fd-3c17-d293-8e48-14fe2e4da212": "Auxiliary Transfer Service",
+    "0000d0ff-3c17-d293-8e48-14fe2e4da212": "Private D0FF Service",
+    "0000feea-0000-1000-8000-00805f9b34fb": "CRP Control Service",
+    "0000fee1-0000-1000-8000-00805f9b34fb": "CRP Primary Notify/Status",
+    "0000fee2-0000-1000-8000-00805f9b34fb": "CRP Primary Write",
+    "0000fee3-0000-1000-8000-00805f9b34fb": "CRP Secondary Notify",
+    "0000fee4-0000-1000-8000-00805f9b34fb": "CRP Device Address",
+    "0000fee5-0000-1000-8000-00805f9b34fb": "CRP Command Write",
+    "0000fee6-0000-1000-8000-00805f9b34fb": "CRP Command Write",
+    "0000fea1-0000-1000-8000-00805f9b34fb": "Auxiliary Status",
+    "0000fec9-0000-1000-8000-00805f9b34fb": "Auxiliary Device Address",
+    "0000fd03-0000-1000-8000-00805f9b34fb": "Auxiliary Transfer Write",
+    "0000fd04-0000-1000-8000-00805f9b34fb": "Auxiliary Transfer Notify",
+    "0000ff02-0000-1000-8000-00805f9b34fb": "Auxiliary Data Write",
+    "0000ff03-0000-1000-8000-00805f9b34fb": "Auxiliary Data Notify",
+    "0000ff04-0000-1000-8000-00805f9b34fb": "Auxiliary Data Control",
+    "0000ffd1-0000-1000-8000-00805f9b34fb": "D0FF Write",
+    "0000ffd2-0000-1000-8000-00805f9b34fb": "D0FF Device Address Mirror",
+    "0000ffd3-0000-1000-8000-00805f9b34fb": "D0FF Read Slot",
+    "0000ffd4-0000-1000-8000-00805f9b34fb": "D0FF Read Slot",
+    "0000ffe0-0000-1000-8000-00805f9b34fb": "D0FF Table",
+    "0000ffe1-0000-1000-8000-00805f9b34fb": "D0FF Empty Read",
+    "0000fff1-0000-1000-8000-00805f9b34fb": "D0FF Info",
+    "0000fff3-0000-1000-8000-00805f9b34fb": "D0FF Short Value",
+    "0000fff4-0000-1000-8000-00805f9b34fb": "D0FF Table",
+    "0000fff5-0000-1000-8000-00805f9b34fb": "D0FF Empty Read",
 }
 
 
@@ -79,6 +106,18 @@ TEXT_CHARACTERISTICS = {
     "00002a27-0000-1000-8000-00805f9b34fb",
     "00002a28-0000-1000-8000-00805f9b34fb",
     "00002a29-0000-1000-8000-00805f9b34fb",
+}
+
+
+MAC_CHARACTERISTICS = {
+    "0000fec9-0000-1000-8000-00805f9b34fb",
+    "0000fee4-0000-1000-8000-00805f9b34fb",
+}
+
+
+PRIVATE_TABLE_CHARACTERISTICS = {
+    "0000ffe0-0000-1000-8000-00805f9b34fb",
+    "0000fff4-0000-1000-8000-00805f9b34fb",
 }
 
 
@@ -504,17 +543,194 @@ def _decode_gatt_value(uuid: str, raw: bytes) -> dict[str, Any]:
     result: dict[str, Any] = {"hex": hex_bytes(raw), "bytes": list(raw)}
     if uuid in TEXT_CHARACTERISTICS:
         text = raw.decode("utf-8", errors="replace").rstrip("\x00").strip()
-        result.update({"type": "text", "value": text, "display": f"{text!r} ({hex_bytes(raw)})"})
+        display = "<empty>" if not raw else f"{text!r} ({hex_bytes(raw)})"
+        result.update({"type": "text", "value": text, "display": display})
         return result
     if uuid == BATTERY_LEVEL and raw:
         result.update({"type": "uint8", "value": raw[0], "display": f"{raw[0]}% ({hex_bytes(raw)})"})
         return result
+    if uuid in MAC_CHARACTERISTICS and len(raw) == 6:
+        mac = _format_mac(raw)
+        result.update({"type": "mac", "value": mac, "display": f"{mac} ({hex_bytes(raw)})"})
+        return result
+    if uuid == "0000ffd2-0000-1000-8000-00805f9b34fb" and len(raw) % 6 == 0:
+        macs = [_format_mac(raw[offset : offset + 6]) for offset in range(0, len(raw), 6)]
+        result.update({"type": "mac_list", "value": macs, "display": f"{macs} ({hex_bytes(raw)})"})
+        return result
     if uuid == "00002a01-0000-1000-8000-00805f9b34fb" and len(raw) >= 2:
-        value = raw[0] | (raw[1] << 8)
-        result.update({"type": "uint16_le", "value": value, "display": f"{value} ({hex_bytes(raw)})"})
+        value = _uint16_le(raw, 0)
+        result.update(
+            {
+                "type": "appearance",
+                "value": value,
+                "display": f"{value} (0x{value:04X}, {hex_bytes(raw)})",
+            }
+        )
+        return result
+    if uuid == "00002a04-0000-1000-8000-00805f9b34fb" and len(raw) >= 8:
+        min_interval = _uint16_le(raw, 0)
+        max_interval = _uint16_le(raw, 2)
+        latency = _uint16_le(raw, 4)
+        supervision_timeout = _uint16_le(raw, 6)
+        value = {
+            "min_interval_units": min_interval,
+            "max_interval_units": max_interval,
+            "latency": latency,
+            "supervision_timeout_units": supervision_timeout,
+            "min_interval_ms": min_interval * 1.25,
+            "max_interval_ms": max_interval * 1.25,
+            "supervision_timeout_ms": supervision_timeout * 10,
+        }
+        result.update(
+            {
+                "type": "connection_parameters",
+                "value": value,
+                "display": (
+                    "connection_parameters="
+                    f"min={value['min_interval_ms']:.2f}ms "
+                    f"max={value['max_interval_ms']:.2f}ms "
+                    f"latency={latency} "
+                    f"timeout={value['supervision_timeout_ms']}ms "
+                    f"({hex_bytes(raw)})"
+                ),
+            }
+        )
+        return result
+    if uuid == "00002a23-0000-1000-8000-00805f9b34fb" and len(raw) == 8:
+        manufacturer = hex_bytes(raw[:5])
+        oui = hex_bytes(raw[5:])
+        result.update(
+            {
+                "type": "system_id",
+                "value": {
+                    "manufacturer_identifier_hex": manufacturer,
+                    "organizationally_unique_identifier_hex": oui,
+                },
+                "display": f"manufacturer={manufacturer} oui={oui} ({hex_bytes(raw)})",
+            }
+        )
+        return result
+    if uuid == "00002a2a-0000-1000-8000-00805f9b34fb" and raw:
+        text = raw[2:].decode("ascii", errors="replace") if len(raw) > 2 else ""
+        result.update(
+            {
+                "type": "ieee_regulatory_certification",
+                "value": {"list_type_hex": hex_bytes(raw[:2]), "text": text},
+                "display": f"list_type={hex_bytes(raw[:2])} text={text!r} ({hex_bytes(raw)})",
+            }
+        )
+        return result
+    if uuid == "00002a50-0000-1000-8000-00805f9b34fb" and len(raw) >= 7:
+        vendor_id_source = raw[0]
+        vendor_id = _uint16_le(raw, 1)
+        product_id = _uint16_le(raw, 3)
+        product_version = _uint16_le(raw, 5)
+        result.update(
+            {
+                "type": "pnp_id",
+                "value": {
+                    "vendor_id_source": vendor_id_source,
+                    "vendor_id": vendor_id,
+                    "product_id": product_id,
+                    "product_version": product_version,
+                },
+                "display": (
+                    "pnp_id="
+                    f"source={vendor_id_source} vendor=0x{vendor_id:04X} "
+                    f"product=0x{product_id:04X} version=0x{product_version:04X} "
+                    f"({hex_bytes(raw)})"
+                ),
+            }
+        )
+        return result
+    if uuid == "00002aa6-0000-1000-8000-00805f9b34fb" and raw:
+        result.update(
+            {
+                "type": "boolean",
+                "value": bool(raw[0]),
+                "display": f"{bool(raw[0])} ({hex_bytes(raw)})",
+            }
+        )
+        return result
+    if uuid == "00002b3a-0000-1000-8000-00805f9b34fb" and raw:
+        result.update({"type": "bitfield", "value": raw[0], "display": f"0x{raw[0]:02X} ({hex_bytes(raw)})"})
         return result
     if uuid == "00002a38-0000-1000-8000-00805f9b34fb" and raw:
-        result.update({"type": "uint8", "value": raw[0], "display": f"{raw[0]} ({hex_bytes(raw)})"})
+        locations = {
+            0: "Other",
+            1: "Chest",
+            2: "Wrist",
+            3: "Finger",
+            4: "Hand",
+            5: "Ear Lobe",
+            6: "Foot",
+        }
+        result.update(
+            {
+                "type": "body_sensor_location",
+                "value": raw[0],
+                "label": locations.get(raw[0]),
+                "display": f"{raw[0]} {locations.get(raw[0], '<unknown>')} ({hex_bytes(raw)})",
+            }
+        )
         return result
-    result.update({"type": "bytes", "display": hex_bytes(raw)})
+    if uuid in PRIVATE_TABLE_CHARACTERISTICS:
+        decoded = _decode_private_table(raw)
+        if decoded is not None:
+            result.update(decoded)
+            return result
+    if raw:
+        result.update({"type": "bytes", "display": hex_bytes(raw)})
+    else:
+        result.update({"type": "bytes", "display": "<empty>"})
     return result
+
+
+def _format_mac(raw: bytes) -> str:
+    return ":".join(f"{byte:02X}" for byte in raw)
+
+
+def _uint16_le(raw: bytes, offset: int) -> int:
+    return raw[offset] | (raw[offset + 1] << 8)
+
+
+def _uint32_le(raw: bytes, offset: int) -> int:
+    return (
+        raw[offset]
+        | (raw[offset + 1] << 8)
+        | (raw[offset + 2] << 16)
+        | (raw[offset + 3] << 24)
+    )
+
+
+def _decode_private_table(raw: bytes) -> dict[str, Any] | None:
+    if len(raw) >= 1 and (len(raw) - 1) % 6 == 0 and raw[0] == (len(raw) - 1) // 6:
+        header = raw[:1]
+        data = raw[1:]
+        count = raw[0]
+    elif len(raw) >= 2 and (len(raw) - 2) % 6 == 0 and raw[1] == (len(raw) - 2) // 6:
+        header = raw[:2]
+        data = raw[2:]
+        count = raw[1]
+    else:
+        return None
+
+    records = []
+    for offset in range(0, len(data), 6):
+        tag = _uint16_le(data, offset)
+        value = _uint32_le(data, offset + 2)
+        records.append(
+            {
+                "tag": tag,
+                "tag_hex": f"0x{tag:04X}",
+                "value": value,
+                "value_hex": f"0x{value:08X}",
+            }
+        )
+
+    display_records = ", ".join(f"{record['tag_hex']}={record['value_hex']}" for record in records)
+    return {
+        "type": "private_table",
+        "value": {"header_hex": hex_bytes(header), "count": count, "records": records},
+        "display": f"private_table header={hex_bytes(header)} count={count} records=[{display_records}]",
+    }

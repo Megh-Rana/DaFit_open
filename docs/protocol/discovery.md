@@ -60,6 +60,13 @@ Other observed standard/auxiliary services:
 - Heart rate: `180d`, characteristic `2a37`
 - Auxiliary service: `3802`, characteristic `4a02`
 
+FireBoltt 148 also exposes private services seen in local captures:
+
+- `000001ff-3c17-d293-8e48-14fe2e4da212`
+- `000002fd-3c17-d293-8e48-14fe2e4da212`
+- `0000d0ff-3c17-d293-8e48-14fe2e4da212`
+- `0000fee7-0000-1000-8000-00805f9b34fb`
+
 ## FireBoltt 148 Advertisement
 
 Observed from a local `dafit-open scan --verbose` run:
@@ -285,3 +292,50 @@ Observed `watchface-support` response:
   - supported values: `[64]`
 - `0xB4 00`, `0xB4 12`, `0xB4 10`, `0xB4 20`, and `0xB4 14` produced no
   response in this run.
+
+## FireBoltt 148 Device Info Capture
+
+Observed from:
+
+```bash
+dafit-open device-info D3:05:F5:F9:B3:E5 --timeout 30 --retries 1 \
+  --json-out ble-logs/fireboltt148-device-info.json
+```
+
+Stable standard GATT values:
+
+- Device name `2a00`: `FireBoltt 148`
+- Appearance `2a01`: `0x00C1`
+- Manufacturer name `2a29`: `MOYOUNG-V2`
+- Software revision `2a28`: `MOY-EES3-2.0.4`
+- Serial number `2a25`: `3238BD7A`
+- PnP ID `2a50`: `01 5D 00 00 00 00 01`
+- Battery `2a19`: `76%` at capture time
+- Body sensor location `2a38`: `0`
+
+Empty or placeholder standard values:
+
+- Model number `2a24`: empty
+- Firmware revision `2a26`: empty
+- Hardware revision `2a27`: empty
+- Preferred connection parameters `2a04`: all zeroes
+- Central address resolution `2aa6`: `00`
+- Server supported features `2b3a`: `00`
+
+Private readable values worth tracking:
+
+- `fee4`: `D3 05 F5 F9 B3 E5`, mirrors the BLE address
+- `fec9`: `D3 05 F5 F9 B3 E5`, mirrors the BLE address
+- `ffd2`: `D3 05 F5 F9 B3 E5 D3 05 F5 F9 B3 E5`, repeats the BLE address twice
+- `fee1`: `56 01 00 1B 01 00 13 00 00`
+- `fea1`: `07 56 01 00 1B 01 00 13 00 00`
+- `fff1`: `0B 01 1D 00 59 01 00 F7 00 00 00 00 00`
+- `fff3`: `14 00`
+- `ffe0`: starts with header/count `00 0B`, then 11 six-byte records
+- `fff4`: starts with count `09`, then 9 six-byte records
+- `ffd3` and `ffd4`: advertised readable, but returned GATT Attribute Not Found
+
+The `d0ff` service likely belongs to a vendor-specific firmware/resource
+transfer path. The six-byte records in `ffe0` and `fff4` look like
+little-endian `(tag:uint16, value:uint32)` entries, but the meaning of each tag
+is still unknown.
