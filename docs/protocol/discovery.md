@@ -150,3 +150,14 @@ resolved:
    connect D3:05:F5:F9:B3:E5
    info D3:05:F5:F9:B3:E5
    ```
+
+Observed `bluetoothctl info` after an attempted connection to FireBoltt 148:
+
+- Device remained `Connected: no`
+- Device remained unpaired/unbonded/untrusted
+- `feea` UUID, manufacturer data, and service data were still visible
+- The watch disappeared and reappeared in discovery around the connection
+  attempt
+
+This means the current blocker is below the Python protocol layer: BlueZ is
+able to discover the watch but is not establishing a GATT connection yet.
