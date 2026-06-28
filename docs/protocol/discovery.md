@@ -176,3 +176,36 @@ Observed `bluetoothctl info` after an attempted connection to FireBoltt 148:
 
 This means the current blocker is below the Python protocol layer: BlueZ is
 able to discover the watch but is not establishing a GATT connection yet.
+
+Later `bluetoothctl connect D3:05:F5:F9:B3:E5` succeeded and resolved services.
+Resolved state:
+
+- `Connected: yes`
+- `ServicesResolved: yes`
+- Appearance: `0x00c1`
+- Modalias: `bluetooth:v005Dp0000d0100`
+
+Resolved primary services:
+
+- `1801` Generic Attribute
+- `1800` Generic Access
+- `000001ff-3c17-d293-8e48-14fe2e4da212`
+- `180f` Battery
+- `180a` Device Information
+- `0000d0ff-3c17-d293-8e48-14fe2e4da212`
+- `fee7`
+- `feea`
+- `180d` Heart Rate
+- `000002fd-3c17-d293-8e48-14fe2e4da212`
+
+Resolved `feea` service shape on FireBoltt 148:
+
+- `fee1`, has CCCD descriptor
+- `fee2`
+- `fee3`, has CCCD descriptor
+- `fee5`
+- `fee6`
+- `fee4`
+
+This differs slightly from the broad decompiled-app service mapper, which also
+knows about optional `fee7`, `fee8`, and `fee9` characteristics under `feea`.
