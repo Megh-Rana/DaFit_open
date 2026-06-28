@@ -17,6 +17,7 @@ from .ble_probe import (
 )
 from .collector import collect
 from .capture_export import load_workout_summaries, write_workout_export
+from .settings_export import load_settings_state, write_settings_export
 from .state_export import load_app_state, write_app_state
 from .tui import run_capture_tui
 from .watchface_export import load_watch_face_state, write_watch_face_export
@@ -45,6 +46,7 @@ def main() -> None:
             "health-basic",
             "health-extended",
             "health-history",
+            "settings-basic",
             "watchface",
             "watchface-support",
         ],
@@ -236,6 +238,17 @@ def main() -> None:
     )
     export_faces_parser.add_argument("--output", help="write export to a file instead of stdout")
 
+    export_settings_parser = subparsers.add_parser(
+        "export-settings",
+        help="export settings state from JSON captures",
+    )
+    export_settings_parser.add_argument(
+        "paths",
+        nargs="*",
+        help="capture files or directories; defaults to ble-logs/",
+    )
+    export_settings_parser.add_argument("--output", help="write export to a file instead of stdout")
+
     export_state_parser = subparsers.add_parser(
         "export-state",
         help="export an app-ready device/watch-face/workout state document",
@@ -391,6 +404,9 @@ def main() -> None:
     elif args.command == "export-watch-faces":
         state = load_watch_face_state(args.paths)
         write_watch_face_export(state, output=args.output)
+    elif args.command == "export-settings":
+        state = load_settings_state(args.paths)
+        write_settings_export(state, output=args.output)
     elif args.command == "export-state":
         state = load_app_state(args.paths, include_samples=args.include_samples)
         write_app_state(state, output=args.output)

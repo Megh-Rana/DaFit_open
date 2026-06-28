@@ -8,6 +8,7 @@ import sys
 from typing import Any, TextIO
 
 from .capture_export import load_workout_summaries
+from .settings_export import load_settings_state
 from .watchface_export import load_watch_face_state
 
 
@@ -33,6 +34,7 @@ def load_app_state(
     return {
         "schema": "dafit-open.app-state.v1",
         "device": load_device_profile(capture_paths),
+        "settings": load_settings_state(capture_paths),
         "watch_faces": load_watch_face_state(capture_paths),
         "workouts": [
             workout.to_dict(include_samples=include_samples)

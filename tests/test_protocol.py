@@ -8,6 +8,11 @@ from dafit_open.protocol import (
     parse_watch_face_screen,
     query_training_detail_packet,
     query_training_series_packet,
+    set_current_time_packet,
+    set_do_not_disturb_time_packet,
+    set_goal_steps_packet,
+    set_time_system_packet,
+    set_timezone_packet,
 )
 
 
@@ -117,6 +122,32 @@ class ProtocolDecodeTest(unittest.TestCase):
         self.assertEqual(screen.thumb_width, 80)
         self.assertEqual(screen.thumb_height, 80)
         self.assertEqual(screen.thumb_corner, 8)
+
+    def test_builds_settings_packets(self) -> None:
+        self.assertEqual(
+            set_goal_steps_packet(10000).build(),
+            bytes.fromhex("FE EA 10 09 16 00 00 27 10"),
+        )
+        self.assertEqual(set_time_system_packet(1).build(), bytes.fromhex("FE EA 10 06 17 01"))
+        self.assertEqual(
+            set_do_not_disturb_time_packet(22, 30, 7, 0).build(),
+            bytes.fromhex("FE EA 10 09 71 16 1E 07 00"),
+        )
+        self.assertEqual(
+            set_current_time_packet(0x12345678).build(),
+            bytes.fromhex("FE EA 10 0A 31 12 34 56 78 08"),
+        )
+        self.assertEqual(
+            set_timezone_packet(19800).build(),
+            bytes.fromhex("FE EA 10 0B BB 07 00 58 4D 00 00"),
+        )
+
+    def test_decodes_settings_frames(self) -> None:
+        self.assertEqual(decode_frame(parse_frame(bytes.fromhex("FE EA 20 06 27 01"))), "time_system=1 payload=01")
+        self.assertEqual(
+            decode_frame(parse_frame(bytes.fromhex("FE EA 20 09 81 16 1E 07 00"))),
+            "do_not_disturb_time start=22:30 end=07:00 payload=16 1E 07 00",
+        )
 
 
 if __name__ == "__main__":

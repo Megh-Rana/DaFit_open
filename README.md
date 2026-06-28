@@ -59,6 +59,7 @@ Run read-oriented health/data discovery queries:
 dafit-open probe AA:BB:CC:DD:EE:FF --query-set health-history
 dafit-open probe AA:BB:CC:DD:EE:FF --query-set health-basic
 dafit-open probe AA:BB:CC:DD:EE:FF --query-set health-extended
+dafit-open probe AA:BB:CC:DD:EE:FF --query-set settings-basic
 ```
 
 Query stored workout details after `health-history` reports training IDs:
@@ -110,6 +111,7 @@ Export captured watch-face state:
 
 ```bash
 dafit-open export-watch-faces ble-logs --output exports/watch-faces.json
+dafit-open export-settings ble-logs --output exports/settings.json
 ```
 
 Export one app-ready state document:
@@ -160,4 +162,5 @@ captures for later analysis.
 - `src/dafit_open/ble_probe.py`: BLE scan/connect/probe logic.
 - `docs/protocol/discovery.md`: current reverse-engineering notes.
 - `docs/protocol/health-sync.md`: health/data sync packet notes.
+- `docs/protocol/settings.md`: settings packet notes.
 - `docs/protocol/watchface-transfer.md`: watch-face transfer packet notes.

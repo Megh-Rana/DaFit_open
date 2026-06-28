@@ -19,6 +19,7 @@ class StateExportTest(unittest.TestCase):
         self.assertEqual(state["device"]["address"], "AA:BB:CC:DD:EE:FF")
         self.assertEqual(state["device"]["name"], "FireBoltt 148")
         self.assertEqual(state["device"]["fields"]["battery_level"], 76)
+        self.assertEqual(state["settings"]["goal_steps"], 10000)
         self.assertEqual(state["watch_faces"]["display_slot"], 4)
         self.assertEqual(state["watch_faces"]["slots"][0]["watch_face_id"], 1)
         self.assertEqual(state["workouts"][0]["id"], 11)
@@ -40,6 +41,7 @@ class StateExportTest(unittest.TestCase):
             "notifications": [
                 {"frame": {"command": 0x29, "payload_hex": "04"}},
                 {"frame": {"command": 0xA6, "payload_hex": "01 01 00 41 00 01"}},
+                {"frame": {"command": 0x26, "payload_hex": "10 27 00 00"}},
                 {
                     "frame": {
                         "command": 0xB2,

@@ -162,8 +162,14 @@ def parse_frame(data: bytes) -> Frame | None:
 def decode_frame(frame: Frame) -> str | None:
     if frame.command == 0x19 and frame.payload:
         return f"display_watch_face_set={frame.payload[0]}"
+    if frame.command == 0x18 and frame.payload:
+        return f"display_time_enabled={frame.payload[0] == 1} payload={hex_bytes(frame.payload)}"
     if frame.command == 0x26:
         return decode_goal_step(frame.payload)
+    if frame.command == 0x27 and frame.payload:
+        return f"time_system={frame.payload[0]} payload={hex_bytes(frame.payload)}"
+    if frame.command == 0x28 and frame.payload:
+        return f"display_time_enabled={frame.payload[0] == 1} payload={hex_bytes(frame.payload)}"
     if frame.command == 0x2E and frame.payload:
         return f"device_version={frame.payload[0]}"
     if frame.command == 0x33:
@@ -188,6 +194,8 @@ def decode_frame(frame: Frame) -> str | None:
         return decode_sleep_time(frame.payload)
     if frame.command == 0x84:
         return decode_support_watch_faces(frame.payload)
+    if frame.command == 0x81:
+        return decode_period_time("do_not_disturb_time", frame.payload)
     if frame.command == 0xA6:
         slots = decode_watch_face_list(frame.payload)
         if slots is None:
@@ -207,6 +215,16 @@ def decode_goal_step(payload: bytes) -> str | None:
         return "goal_step=<empty>"
     value = int.from_bytes(payload[:4], byteorder="little", signed=False)
     return f"goal_step={value} payload={hex_bytes(payload)}"
+
+
+def decode_period_time(label: str, payload: bytes) -> str | None:
+    payload = bytes(payload)
+    if len(payload) < 4:
+        return f"{label} payload={hex_bytes(payload)}"
+    return (
+        f"{label} start={payload[0]:02d}:{payload[1]:02d} "
+        f"end={payload[2]:02d}:{payload[3]:02d} payload={hex_bytes(payload)}"
+    )
 
 
 def decode_history_step_sleep_marker(payload: bytes) -> str | None:
@@ -532,6 +550,53 @@ def set_display_watch_face_packet(index: int) -> Packet:
     return Packet(0x19, bytes([index]))
 
 
+def set_goal_steps_packet(steps: int) -> Packet:
+    if not 0 <= steps <= 0xFFFFFFFF:
+        raise ValueError(f"goal steps must fit in uint32: {steps}")
+    return Packet(0x16, steps.to_bytes(4, "big"))
+
+
+def set_time_system_packet(value: int) -> Packet:
+    if value not in {0, 1}:
+        raise ValueError(f"time system must be 0 or 1: {value}")
+    return Packet(0x17, bytes([value]))
+
+
+def set_display_time_packet(enabled: bool) -> Packet:
+    return Packet(0x18, bytes([1 if enabled else 0]))
+
+
+def set_do_not_disturb_time_packet(
+    start_hour: int,
+    start_minute: int,
+    end_hour: int,
+    end_minute: int,
+) -> Packet:
+    for label, value, limit in (
+        ("start_hour", start_hour, 23),
+        ("start_minute", start_minute, 59),
+        ("end_hour", end_hour, 23),
+        ("end_minute", end_minute, 59),
+    ):
+        if not 0 <= value <= limit:
+            raise ValueError(f"{label} out of range: {value}")
+    return Packet(0x71, bytes([start_hour, start_minute, end_hour, end_minute]))
+
+
+def set_current_time_packet(timestamp: int, timezone_marker: int = 8) -> Packet:
+    if not 0 <= timestamp <= 0xFFFFFFFF:
+        raise ValueError(f"timestamp must fit in uint32: {timestamp}")
+    if not 0 <= timezone_marker <= 0xFF:
+        raise ValueError(f"timezone marker must fit in one byte: {timezone_marker}")
+    return Packet(0x31, timestamp.to_bytes(4, "big") + bytes([timezone_marker]))
+
+
+def set_timezone_packet(offset_seconds: int) -> Packet:
+    if not -(2**31) <= offset_seconds < 2**31:
+        raise ValueError(f"timezone offset must fit in int32: {offset_seconds}")
+    return Packet(0xBB, bytes([0x07, 0x00]) + offset_seconds.to_bytes(4, "little", signed=True))
+
+
 def query_training_detail_packet(training_id: int) -> Packet:
     if not 0 <= training_id <= 0xFF:
         raise ValueError(f"training id must fit in one byte: {training_id}")
@@ -583,6 +648,9 @@ QUERY_JIELI_DOWNLOAD_WATCH_FACE_LIST = Packet(0xB4, bytes([0x12]))
 QUERY_JIELI_SUPPORT_WATCH_FACE = Packet(0xB4, bytes([0x10]))
 QUERY_HISILICON_SUPPORT_WATCH_FACE = Packet(0xB4, bytes([0x20]))
 QUERY_GOAL_STEP = Packet(0x26)
+QUERY_TIME_SYSTEM = Packet(0x27)
+QUERY_DISPLAY_TIME = Packet(0x28)
+QUERY_DO_NOT_DISTURB_TIME = Packet(0x81)
 QUERY_SLEEP_TIME = Packet(0xB8, bytes([0x03]))
 QUERY_HISTORY_STEP_TODAY = Packet(0x33, bytes([0x00]))
 QUERY_HISTORY_STEP_DETAIL_TODAY = Packet(0xB6, bytes([0x00, 0x00]))
@@ -648,11 +716,19 @@ HEALTH_EXTENDED_QUERY_PACKETS = [
     QUERY_HISTORY_TRAINING_LIST,
 ]
 
+SETTINGS_BASIC_QUERY_PACKETS = [
+    QUERY_GOAL_STEP,
+    QUERY_TIME_SYSTEM,
+    QUERY_DISPLAY_TIME,
+    QUERY_DO_NOT_DISTURB_TIME,
+]
+
 QUERY_SETS = {
     "default": DEFAULT_QUERY_PACKETS,
     "health-basic": HEALTH_BASIC_QUERY_PACKETS,
     "health-extended": HEALTH_EXTENDED_QUERY_PACKETS,
     "health-history": HEALTH_HISTORY_QUERY_PACKETS,
+    "settings-basic": SETTINGS_BASIC_QUERY_PACKETS,
     "watchface": WATCH_FACE_QUERY_PACKETS,
     "watchface-support": WATCH_FACE_SUPPORT_QUERY_PACKETS,
 }
