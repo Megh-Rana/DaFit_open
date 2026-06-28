@@ -39,11 +39,24 @@ Probe a device:
 dafit-open probe AA:BB:CC:DD:EE:FF
 ```
 
+Read all readable GATT characteristics without sending protocol commands:
+
+```bash
+dafit-open device-info AA:BB:CC:DD:EE:FF
+```
+
 Run extra watch-face queries:
 
 ```bash
 dafit-open probe AA:BB:CC:DD:EE:FF --query-set watchface
 dafit-open probe AA:BB:CC:DD:EE:FF --query-set watchface-support
+```
+
+Save structured captures under the ignored `ble-logs/` folder:
+
+```bash
+dafit-open device-info AA:BB:CC:DD:EE:FF --json-out ble-logs/device-info.json
+dafit-open probe AA:BB:CC:DD:EE:FF --query-set watchface-support --json-out ble-logs/watchface-support.json
 ```
 
 For Linux/BlueZ connection timeouts, keep the watch awake/nearby and try:
@@ -71,7 +84,8 @@ info AA:BB:CC:DD:EE:FF
 ```
 
 The probe currently enumerates services, enables likely notification
-characteristics, and sends a couple of read-only query packets.
+characteristics, sends read-only query packets, and can save decoded packet
+captures for later analysis.
 
 ## Repo Layout
 

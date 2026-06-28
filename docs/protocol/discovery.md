@@ -110,7 +110,7 @@ is `0x10`. In larger-MTU mode, `flags` is `0x20` plus the high length byte.
 Examples represented by our clean code:
 
 - Query device version: command `0x2E`, no payload.
-- Query display watch face: command `0xB4`, payload `00`.
+- Query display watch face: command `0x29`, no payload.
 - Query watch face list: command `0xA6`, payload `01`.
 
 ## Next Validation
@@ -120,6 +120,7 @@ Run:
 ```bash
 dafit-open scan
 dafit-open probe <watch-address>
+dafit-open device-info <watch-address>
 ```
 
 Capture:
@@ -128,6 +129,7 @@ Capture:
 - Full GATT service list.
 - Notification bytes after enabling notifications.
 - Responses to the initial query packets.
+- Values from readable GATT characteristics.
 
 Add the captured bytes to a separate local log first. Only promote stable,
 non-private protocol facts into these docs.
