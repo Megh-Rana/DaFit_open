@@ -272,3 +272,14 @@ The probe supports query sets:
 - `watchface-support`: support-watchface cluster matching
   `querySupportWatchFace()` in the app: `0x84`, `0xB4 00`, `0xB4 12`,
   `0xB4 10`, `0xB4 20`, `0xB4 14`
+
+Observed `watchface-support` response:
+
+- `0x84` query sent: `FE EA 10 05 84`
+- `0x84` response: `FE EA 20 08 84 FF FF 40`
+- App parser path: `ka.a` case `-124` -> `L2()` -> `ca.n0.i(byte[])`
+- Parsed as support-watch-face info:
+  - display index: `65535`
+  - supported values: `[64]`
+- `0xB4 00`, `0xB4 12`, `0xB4 10`, `0xB4 20`, and `0xB4 14` produced no
+  response in this run.

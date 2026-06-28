@@ -124,6 +124,8 @@ def decode_frame(frame: Frame) -> str | None:
         return f"device_version={frame.payload[0]}"
     if frame.command == 0x29 and frame.payload:
         return f"display_watch_face={frame.payload[0]}"
+    if frame.command == 0x84:
+        return decode_support_watch_faces(frame.payload)
     if frame.command == 0xA6:
         slots = decode_watch_face_list(frame.payload)
         if slots is None:
@@ -135,6 +137,15 @@ def decode_frame(frame: Frame) -> str | None:
     if frame.command == 0xB4:
         return decode_watch_face_subcommand(frame.payload)
     return None
+
+
+def decode_support_watch_faces(payload: bytes) -> str | None:
+    payload = bytes(payload)
+    if len(payload) < 2:
+        return None
+    display_index = (payload[0] << 8) + payload[1]
+    supported = list(payload[2:])
+    return f"support_watch_faces=display_index={display_index} supported={supported}"
 
 
 def decode_watch_face_subcommand(payload: bytes) -> str | None:
@@ -160,7 +171,7 @@ def decode_watch_face_subcommand(payload: bytes) -> str | None:
     if subcommand == 0 and len(data) >= 2:
         display_index = (data[0] << 8) + data[1]
         supported = list(data[2:])
-        return f"support_watch_faces=display_index={display_index} supported={supported}"
+        return f"watch_face_subcommand=0x00 display_index={display_index} supported={supported}"
     return f"watch_face_subcommand=0x{subcommand:02X} payload={hex_bytes(data)}"
 
 
