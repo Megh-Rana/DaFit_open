@@ -23,6 +23,11 @@ def main() -> None:
     probe_parser.add_argument("--retries", type=int, default=3)
     probe_parser.add_argument("--pair", action="store_true")
     probe_parser.add_argument("--direct", action="store_true")
+    probe_parser.add_argument(
+        "--query-set",
+        choices=["default", "watchface", "watchface-support"],
+        default="default",
+    )
 
     args = parser.parse_args()
     if args.command == "scan":
@@ -36,5 +41,6 @@ def main() -> None:
                 args.retries,
                 pair=args.pair,
                 direct=args.direct,
+                query_set=args.query_set,
             )
         )

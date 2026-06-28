@@ -255,3 +255,20 @@ Parsed slots:
 - index `4`, type `B`, id `3302`
 - index `5`, type `B`, id `3298`
 - index `6`, type `B`, id `3297`
+
+Follow-up probe confirmed:
+
+- `0x29` query sent: `FE EA 10 05 29`
+- `0x29` response: `FE EA 20 06 29 06`
+- Parsed current display slot: `6`
+- Current display slot maps to watch-face id `3297` from the `0xA6` list.
+- `0xB4 14` was sent as `FE EA 10 06 B4 14`; no response was observed in that
+  run.
+
+The probe supports query sets:
+
+- `default`: device version, current display slot, watch-face list
+- `watchface`: default plus screen-info query `0xB4 14`
+- `watchface-support`: support-watchface cluster matching
+  `querySupportWatchFace()` in the app: `0x84`, `0xB4 00`, `0xB4 12`,
+  `0xB4 10`, `0xB4 20`, `0xB4 14`

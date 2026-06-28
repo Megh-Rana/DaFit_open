@@ -39,6 +39,13 @@ Probe a device:
 dafit-open probe AA:BB:CC:DD:EE:FF
 ```
 
+Run extra watch-face queries:
+
+```bash
+dafit-open probe AA:BB:CC:DD:EE:FF --query-set watchface
+dafit-open probe AA:BB:CC:DD:EE:FF --query-set watchface-support
+```
+
 For Linux/BlueZ connection timeouts, keep the watch awake/nearby and try:
 
 ```bash

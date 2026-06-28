@@ -20,10 +20,7 @@ from .protocol import (
     CRP_WRITE_PRIMARY,
     HEART_RATE_MEASUREMENT,
     Packet,
-    QUERY_DEVICE_VERSION,
-    QUERY_DISPLAY_WATCH_FACE,
-    QUERY_WATCH_FACE_LIST,
-    QUERY_WATCH_FACE_SCREEN,
+    QUERY_SETS,
     decode_frame,
     hex_bytes,
     parse_frame,
@@ -71,6 +68,7 @@ async def probe(
     retries: int = 3,
     pair: bool = False,
     direct: bool = False,
+    query_set: str = "default",
 ) -> None:
     device: BLEDevice | str
     if direct:
@@ -87,7 +85,7 @@ async def probe(
     for attempt in range(1, retries + 1):
         try:
             print(f"connecting to {_device_label(device)}, attempt {attempt}/{retries}")
-            await _probe_device(device, timeout, pair=pair)
+            await _probe_device(device, timeout, pair=pair, query_set=query_set)
             return
         except TimeoutError as exc:
             last_error = exc
@@ -108,7 +106,12 @@ async def probe(
         print(f"last error: {type(last_error).__name__}: {last_error}")
 
 
-async def _probe_device(device: BLEDevice | str, timeout: float, pair: bool) -> None:
+async def _probe_device(
+    device: BLEDevice | str,
+    timeout: float,
+    pair: bool,
+    query_set: str,
+) -> None:
     async with BleakClient(device, timeout=timeout, pair=pair) as client:
         print(f"connected: {client.is_connected}")
 
@@ -142,6 +145,7 @@ async def _probe_device(device: BLEDevice | str, timeout: float, pair: bool) -> 
             write_char,
             write_with_response=write_with_response,
             mtu_payload=_guess_mtu_payload(client),
+            query_set=query_set,
         )
         await asyncio.sleep(5)
 
@@ -184,13 +188,11 @@ async def _send_queries(
     write_char: object,
     write_with_response: bool,
     mtu_payload: int,
+    query_set: str,
 ) -> None:
-    for packet in [
-        QUERY_DEVICE_VERSION,
-        QUERY_DISPLAY_WATCH_FACE,
-        QUERY_WATCH_FACE_LIST,
-        QUERY_WATCH_FACE_SCREEN,
-    ]:
+    packets = QUERY_SETS[query_set]
+    print(f"query set: {query_set}")
+    for packet in packets:
         await _write_packet(client, write_char, packet, write_with_response, mtu_payload)
         await asyncio.sleep(0.5)
 
