@@ -15,6 +15,7 @@ from .ble_probe import (
     training_series,
     watch_faces,
 )
+from .collector import collect
 from .capture_export import load_workout_summaries, write_workout_export
 from .state_export import load_app_state, write_app_state
 from .tui import run_capture_tui
@@ -164,6 +165,48 @@ def main() -> None:
     sync_training_parser.add_argument("--pair", action="store_true")
     sync_training_parser.add_argument("--direct", action="store_true")
     sync_training_parser.add_argument("--json-out", help="write a structured JSON capture")
+
+    collect_parser = subparsers.add_parser(
+        "collect",
+        help="refresh known device/watch-face/training data and export app state",
+    )
+    collect_parser.add_argument("address")
+    collect_parser.add_argument("--out-dir", help="capture output directory")
+    collect_parser.add_argument("--timeout", type=float, default=45.0)
+    collect_parser.add_argument("--scan-timeout", type=float, default=10.0)
+    collect_parser.add_argument("--retries", type=int, default=1)
+    collect_parser.add_argument("--pair", action="store_true")
+    collect_parser.add_argument("--direct", action="store_true")
+    collect_parser.add_argument(
+        "--wait-timeout",
+        type=float,
+        default=4.0,
+        help="seconds to wait for each watch-face response",
+    )
+    collect_parser.add_argument(
+        "--training-kind",
+        choices=["all", "heart-rate", "steps", "distance"],
+        action="append",
+        default=None,
+        help="training series kind to sync; can be repeated",
+    )
+    collect_parser.add_argument(
+        "--chunk-timeout",
+        type=float,
+        default=8.0,
+        help="seconds to wait for each training response",
+    )
+    collect_parser.add_argument(
+        "--no-training",
+        action="store_true",
+        help="skip training sync for a faster collection",
+    )
+    collect_parser.add_argument("--export-state", help="app-state JSON output path")
+    collect_parser.add_argument(
+        "--include-samples",
+        action="store_true",
+        help="include workout sample arrays in the exported state",
+    )
 
     export_parser = subparsers.add_parser(
         "export-captures",
@@ -317,6 +360,24 @@ def main() -> None:
                 direct=args.direct,
                 chunk_timeout=args.chunk_timeout,
                 json_out=args.json_out,
+            )
+        )
+    elif args.command == "collect":
+        asyncio.run(
+            collect(
+                args.address,
+                out_dir=args.out_dir,
+                timeout=args.timeout,
+                scan_timeout=args.scan_timeout,
+                retries=args.retries,
+                pair=args.pair,
+                direct=args.direct,
+                wait_timeout=args.wait_timeout,
+                include_training=not args.no_training,
+                training_kinds=args.training_kind,
+                chunk_timeout=args.chunk_timeout,
+                export_state=args.export_state,
+                include_samples=args.include_samples,
             )
         )
     elif args.command == "export-captures":

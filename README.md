@@ -69,6 +69,13 @@ dafit-open training-series AA:BB:CC:DD:EE:FF 11 --kind all
 dafit-open sync-training AA:BB:CC:DD:EE:FF --json-out ble-logs/training-sync.json
 ```
 
+Collect the currently implemented app-style data in one workflow:
+
+```bash
+dafit-open collect AA:BB:CC:DD:EE:FF --out-dir ble-logs/current --export-state exports/app-state.json
+dafit-open collect AA:BB:CC:DD:EE:FF --no-training --out-dir ble-logs/current-fast
+```
+
 Set the active watch-face slot after confirming the slot list:
 
 ```bash
