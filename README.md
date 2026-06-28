@@ -60,6 +60,12 @@ dafit-open probe AA:BB:CC:DD:EE:FF --query-set health-basic
 dafit-open probe AA:BB:CC:DD:EE:FF --query-set health-extended
 ```
 
+Query stored workout details after `health-history` reports training IDs:
+
+```bash
+dafit-open training-detail AA:BB:CC:DD:EE:FF 11 12 13 14
+```
+
 Set the active watch-face slot after confirming the slot list:
 
 ```bash
@@ -71,6 +77,7 @@ Save structured captures under the ignored `ble-logs/` folder:
 ```bash
 dafit-open device-info AA:BB:CC:DD:EE:FF --json-out ble-logs/device-info.json
 dafit-open probe AA:BB:CC:DD:EE:FF --query-set watchface-support --json-out ble-logs/watchface-support.json
+dafit-open training-detail AA:BB:CC:DD:EE:FF 11 --json-out ble-logs/training-detail-11.json
 dafit-open set-watch-face AA:BB:CC:DD:EE:FF 5 --confirm --json-out ble-logs/set-watch-face-5.json
 ```
 

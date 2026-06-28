@@ -41,6 +41,10 @@ were silent in early FireBoltt 148 captures:
 
 The `health-basic` query set sends both groups.
 
+The targeted `training-detail` command sends stored training detail requests:
+
+- Stored training detail: `0xB2`, payload `02 <id>`
+
 Run:
 
 ```bash
@@ -64,6 +68,11 @@ dafit-open probe D3:05:F5:F9:B3:E5 --timeout 30 --retries 1 \
 - `y9.a.queryMovementHeartRate()` sends `u9.v0.f()` -> command `0x37`.
 - `y9.a.queryHistoryTraining()` sends `u9.l1.f()` and `u9.l1.a()` -> command
   `0xB2`, payloads `06` and `00`.
+- `u9.l1.b(id)` sends command `0xB2`, payload `02 <id>`, to request one stored
+  training detail.
+- `u9.l1.e(id, offset)`, `u9.l1.g(id, offset)`, and `u9.l1.c(id, offset)` send
+  `0xB2` payloads `04`, `07`, and `09` for training heart-rate, step, and
+  distance chunks.
 
 ## Parser Routes
 
@@ -74,10 +83,10 @@ dafit-open probe D3:05:F5:F9:B3:E5 --timeout 30 --retries 1 \
 - Command `0xAB` routes to `ka.a.z(byte[])`, where payload byte `0` selects
   heart rate, blood pressure, or blood oxygen history.
 - Command `0xB8` routes to `ka.a.h(byte[])`; subcommand `3` is sleep time.
-- Command `0xB2` routes to `ka.a.a3(byte[])`, used by training history.
-
-The current Python decoder only labels these frames and captures raw payloads.
-Full parsers should be added only after we collect live samples.
+- Command `0xB2` routes to `ka.a.a3(byte[])`, used by training history:
+  payload byte `1` parses the training list, byte `3` parses one training
+  detail, and bytes `4`, `7`, and `9` parse heart-rate, step, and distance
+  chunks.
 
 ## FireBoltt 148 Health-Basic Capture
 
@@ -100,8 +109,10 @@ Responses:
   `(systolic:uint8, diastolic:uint8, timestamp:uint32-le)`.
 - History blood-oxygen query `0xAB 02` returned `FE EA 20 07 AB 02 00`, decoded
   as zero records.
-- Training query `0xB2 00` returned a payload beginning with `01` and containing
-  several plausible Unix timestamps. The non-timestamp fields are still unknown.
+- Training query `0xB2 00` returned a payload beginning with `01`. Confirmed
+  layout: first byte `01`, then repeated
+  `(timestamp:uint32-le seconds, type:uint8)`. The record id is the zero-based
+  5-byte record index.
 
 The same response set repeated in a second `health-basic` capture:
 
@@ -122,3 +133,35 @@ Silent in both runs:
 The `0xAB` history timestamps decode as Unix seconds. Their year/month/day
 values were plausible for existing historical records, so the Python decoder now
 prints them as UTC ISO timestamps.
+
+## FireBoltt 148 Health-History Capture
+
+Observed from:
+
+```bash
+dafit-open probe D3:05:F5:F9:B3:E5 --timeout 30 --retries 1 \
+  --query-set health-history \
+  --json-out ble-logs/fireboltt148-health-history.json
+```
+
+Responses:
+
+- Goal step: `goal_step=10000`.
+- History heart rate: four records at `2026-02-10T07:18:17+00:00`,
+  `2026-02-26T04:31:13+00:00`, `2026-04-11T09:36:17+00:00`, and
+  `2026-04-15T02:17:13+00:00`.
+- History blood pressure: two records at `2026-04-09T04:47:00+00:00` and
+  `2026-04-10T07:22:24+00:00`.
+- History blood oxygen: zero records.
+- History training list:
+  - `id=11 type=0 start=2026-02-19T23:49:19+00:00`
+  - `id=12 type=0 start=2026-04-09T22:59:20+00:00`
+  - `id=13 type=0 start=2026-04-10T10:19:32+00:00`
+  - `id=14 type=0 start=2026-04-12T22:59:11+00:00`
+
+Next detail probe:
+
+```bash
+dafit-open training-detail D3:05:F5:F9:B3:E5 11 12 13 14 --timeout 30 \
+  --retries 1 --json-out ble-logs/fireboltt148-training-detail.json
+```

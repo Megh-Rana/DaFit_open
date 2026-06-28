@@ -216,8 +216,32 @@ def decode_training_history(payload: bytes) -> str | None:
     payload = bytes(payload)
     if not payload:
         return None
-    subcommands = {0: "history_training_detail", 6: "history_training_list"}
-    label = subcommands.get(payload[0], "training_subcommand")
+    subcommand = payload[0]
+    if subcommand == 1:
+        records = _decode_training_list(payload)
+        if records is not None:
+            return f"history_training_list records={records}"
+    if subcommand == 3:
+        detail = _decode_training_detail(payload)
+        if detail is not None:
+            return f"history_training_detail {detail}"
+    if subcommand in {4, 7, 9}:
+        chunk = _decode_training_series_chunk(payload)
+        if chunk is not None:
+            labels = {4: "heart_rate", 7: "steps", 9: "distance"}
+            return f"history_training_{labels[subcommand]} {chunk}"
+
+    labels = {
+        0: "history_training_list_request",
+        1: "history_training_list",
+        2: "history_training_detail_request",
+        3: "history_training_detail",
+        4: "history_training_heart_rate",
+        6: "history_training_list_prepare",
+        7: "history_training_steps",
+        9: "history_training_distance",
+    }
+    label = labels.get(subcommand, "training_subcommand")
     timestamps = _find_plausible_timestamps(payload)
     if timestamps:
         return f"{label} timestamps={timestamps} payload={hex_bytes(payload)}"
@@ -276,6 +300,48 @@ def _decode_blood_oxygen_record(record: bytes) -> str:
     spo2 = record[0]
     timestamp = int.from_bytes(record[1:5], "little")
     return f"spo2={spo2}@{_format_timestamp(timestamp)}"
+
+
+def _decode_training_list(payload: bytes) -> list[str] | None:
+    if len(payload) % 5 != 1:
+        return None
+    records = []
+    for offset in range(1, len(payload), 5):
+        timestamp = int.from_bytes(payload[offset : offset + 4], "little")
+        if timestamp <= 1:
+            continue
+        record_id = offset // 5
+        training_type = payload[offset + 4]
+        records.append(f"id={record_id} type={training_type} start={_format_timestamp(timestamp)}")
+    return records
+
+
+def _decode_training_detail(payload: bytes) -> str | None:
+    if len(payload) < 26:
+        return None
+    training_id = payload[1]
+    start = int.from_bytes(payload[2:6], "little")
+    end = int.from_bytes(payload[6:10], "little")
+    valid_time = int.from_bytes(payload[10:12], "little")
+    training_type = payload[13]
+    steps = int.from_bytes(payload[14:18], "little")
+    distance = int.from_bytes(payload[18:22], "little")
+    calories = int.from_bytes(payload[22:24], "little")
+    return (
+        f"id={training_id} type={training_type} "
+        f"start={_format_timestamp(start)} end={_format_timestamp(end)} "
+        f"valid_time={valid_time} steps={steps} distance={distance} calories={calories} "
+        f"payload={hex_bytes(payload)}"
+    )
+
+
+def _decode_training_series_chunk(payload: bytes) -> str | None:
+    if len(payload) < 4:
+        return None
+    training_id = payload[1]
+    offset = int.from_bytes(payload[2:4], "little")
+    data = list(payload[4:])
+    return f"id={training_id} next_offset={offset} values={data} payload={hex_bytes(payload)}"
 
 
 def _find_plausible_timestamps(data: bytes) -> list[str]:
@@ -359,6 +425,12 @@ def set_display_watch_face_packet(index: int) -> Packet:
     if not 0 <= index <= 0xFF:
         raise ValueError(f"watch-face index must fit in one byte: {index}")
     return Packet(0x19, bytes([index]))
+
+
+def query_training_detail_packet(training_id: int) -> Packet:
+    if not 0 <= training_id <= 0xFF:
+        raise ValueError(f"training id must fit in one byte: {training_id}")
+    return Packet(0xB2, bytes([0x02, training_id]))
 
 
 def watch_face_transfer_prepare_packet(total_size: int, file_count: int) -> Packet:

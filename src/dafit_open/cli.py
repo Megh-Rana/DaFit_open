@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 
-from .ble_probe import device_info, probe, scan, set_watch_face
+from .ble_probe import device_info, probe, scan, set_watch_face, training_detail
 
 
 def main() -> None:
@@ -64,6 +64,19 @@ def main() -> None:
         help="required because this changes watch state",
     )
 
+    training_detail_parser = subparsers.add_parser(
+        "training-detail",
+        help="query stored training detail by history id",
+    )
+    training_detail_parser.add_argument("address")
+    training_detail_parser.add_argument("ids", nargs="+", type=int, help="training history ids")
+    training_detail_parser.add_argument("--timeout", type=float, default=45.0)
+    training_detail_parser.add_argument("--scan-timeout", type=float, default=10.0)
+    training_detail_parser.add_argument("--retries", type=int, default=3)
+    training_detail_parser.add_argument("--pair", action="store_true")
+    training_detail_parser.add_argument("--direct", action="store_true")
+    training_detail_parser.add_argument("--json-out", help="write a structured JSON capture")
+
     args = parser.parse_args()
     if args.command == "scan":
         asyncio.run(scan(args.timeout, args.verbose))
@@ -99,6 +112,19 @@ def main() -> None:
         asyncio.run(
             device_info(
                 args.address,
+                args.timeout,
+                args.scan_timeout,
+                args.retries,
+                pair=args.pair,
+                direct=args.direct,
+                json_out=args.json_out,
+            )
+        )
+    elif args.command == "training-detail":
+        asyncio.run(
+            training_detail(
+                args.address,
+                args.ids,
                 args.timeout,
                 args.scan_timeout,
                 args.retries,
