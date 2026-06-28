@@ -5,7 +5,15 @@ from __future__ import annotations
 import argparse
 import asyncio
 
-from .ble_probe import device_info, probe, scan, set_watch_face, training_detail, training_series
+from .ble_probe import (
+    device_info,
+    probe,
+    scan,
+    set_watch_face,
+    sync_training,
+    training_detail,
+    training_series,
+)
 from .capture_export import load_workout_summaries, write_workout_export
 
 
@@ -105,6 +113,31 @@ def main() -> None:
     training_series_parser.add_argument("--direct", action="store_true")
     training_series_parser.add_argument("--json-out", help="write a structured JSON capture")
 
+    sync_training_parser = subparsers.add_parser(
+        "sync-training",
+        help="discover stored trainings and fetch details/series in one session",
+    )
+    sync_training_parser.add_argument("address")
+    sync_training_parser.add_argument(
+        "--kind",
+        choices=["all", "heart-rate", "steps", "distance"],
+        action="append",
+        default=None,
+        help="series kind to query for each workout; can be repeated",
+    )
+    sync_training_parser.add_argument(
+        "--chunk-timeout",
+        type=float,
+        default=6.0,
+        help="seconds to wait for each training response",
+    )
+    sync_training_parser.add_argument("--timeout", type=float, default=45.0)
+    sync_training_parser.add_argument("--scan-timeout", type=float, default=10.0)
+    sync_training_parser.add_argument("--retries", type=int, default=3)
+    sync_training_parser.add_argument("--pair", action="store_true")
+    sync_training_parser.add_argument("--direct", action="store_true")
+    sync_training_parser.add_argument("--json-out", help="write a structured JSON capture")
+
     export_parser = subparsers.add_parser(
         "export-captures",
         help="export structured summaries from JSON captures",
@@ -191,6 +224,20 @@ def main() -> None:
                 args.retries,
                 pair=args.pair,
                 direct=args.direct,
+                json_out=args.json_out,
+            )
+        )
+    elif args.command == "sync-training":
+        asyncio.run(
+            sync_training(
+                args.address,
+                args.kind or ["heart-rate"],
+                args.timeout,
+                args.scan_timeout,
+                args.retries,
+                pair=args.pair,
+                direct=args.direct,
+                chunk_timeout=args.chunk_timeout,
                 json_out=args.json_out,
             )
         )

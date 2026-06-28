@@ -226,3 +226,14 @@ Additional heart-rate series captures:
   `62`.
 - Training id `14`: offsets `0 -> 135 -> 270 -> 405 -> 540 -> 675 -> 65535`;
   raw samples `676`, non-zero samples `672`.
+
+The `sync-training` command reproduces the same sequence in one BLE session:
+
+```bash
+dafit-open sync-training D3:05:F5:F9:B3:E5 --timeout 45 --retries 1 \
+  --chunk-timeout 8 --json-out ble-logs/fireboltt148-sync-training.json
+```
+
+It discovered training ids `11`, `12`, `13`, and `14`, fetched detail for each,
+and completed heart-rate series for all four ids. Exporting all captures after
+this run kept the same sample counts because duplicate chunks are de-duplicated.

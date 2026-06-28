@@ -25,6 +25,7 @@ from .protocol import (
     HEART_RATE_MEASUREMENT,
     Packet,
     QUERY_DISPLAY_WATCH_FACE,
+    QUERY_HISTORY_TRAINING_DETAIL,
     QUERY_SETS,
     decode_frame,
     hex_bytes,
@@ -513,6 +514,86 @@ async def training_series(
     _write_capture(json_out, capture)
 
 
+async def sync_training(
+    address: str,
+    kinds: list[str],
+    timeout: float = 45.0,
+    scan_timeout: float = 10.0,
+    retries: int = 3,
+    pair: bool = False,
+    direct: bool = False,
+    chunk_timeout: float = 6.0,
+    json_out: str | None = None,
+) -> None:
+    if "all" in kinds:
+        kinds = ["heart-rate", "steps", "distance"]
+
+    capture = _new_capture(
+        "sync-training",
+        address,
+        {
+            "kinds": kinds,
+            "timeout": timeout,
+            "scan_timeout": scan_timeout,
+            "retries": retries,
+            "pair": pair,
+            "direct": direct,
+            "chunk_timeout": chunk_timeout,
+        },
+    )
+    device: BLEDevice | str
+    if direct:
+        print(f"using direct address connection for {address}")
+        device = address
+    else:
+        found_device = await _find_device(address, scan_timeout)
+        if found_device is None:
+            print(f"device not found during {scan_timeout:.1f}s scan: {address}")
+            _write_capture(json_out, capture)
+            return
+        device = found_device
+        capture["device"] = _device_snapshot(device)
+
+    last_error: BaseException | None = None
+    for attempt in range(1, retries + 1):
+        try:
+            print(f"connecting to {_device_label(device)}, attempt {attempt}/{retries}")
+            capture["attempts"].append({"attempt": attempt, "device": _device_label(device)})
+            await _sync_training_device(
+                device,
+                kinds,
+                timeout,
+                pair=pair,
+                chunk_timeout=chunk_timeout,
+                capture=capture,
+            )
+            _write_capture(json_out, capture)
+            return
+        except TimeoutError as exc:
+            last_error = exc
+            print(f"connect timed out after {timeout:.1f}s")
+            capture["errors"].append({"attempt": attempt, "type": "TimeoutError", "message": str(exc)})
+        except Exception as exc:
+            last_error = exc
+            print(f"sync-training failed: {type(exc).__name__}: {exc}")
+            capture["errors"].append(
+                {"attempt": attempt, "type": type(exc).__name__, "message": str(exc)}
+            )
+
+        if attempt < retries:
+            await asyncio.sleep(2)
+            if not direct:
+                refreshed = await _find_device(address, scan_timeout)
+                if refreshed is not None:
+                    device = refreshed
+                    capture["device"] = _device_snapshot(refreshed)
+
+    print("sync-training failed after all retries")
+    if last_error is not None:
+        print(f"last error: {type(last_error).__name__}: {last_error}")
+    _write_capture(json_out, capture)
+
+
 async def _probe_device(
     device: BLEDevice | str,
     timeout: float,
@@ -750,6 +831,99 @@ async def _training_series_device(
             await client.stop_notify(char)
 
 
+async def _sync_training_device(
+    device: BLEDevice | str,
+    kinds: list[str],
+    timeout: float,
+    pair: bool,
+    chunk_timeout: float,
+    capture: dict[str, Any],
+) -> None:
+    async with BleakClient(device, timeout=timeout, pair=pair) as client:
+        print(f"connected: {client.is_connected}")
+        capture["connected"] = client.is_connected
+
+        services = client.services
+        write_char = None
+        write_with_response = True
+        notify_chars = []
+
+        for service in services:
+            print(f"service {service.uuid}")
+            for char in service.characteristics:
+                props = ",".join(char.properties)
+                print(f"  char {char.uuid} [{props}]")
+                uuid = char.uuid.lower()
+                if uuid == CRP_WRITE_PRIMARY and _can_write(char.properties):
+                    write_char = char
+                    write_with_response = "write" in char.properties
+                if uuid in NOTIFY_UUIDS and "notify" in char.properties:
+                    notify_chars.append(char)
+
+        capture["services"] = _services_snapshot(services)
+        notification_queue: asyncio.Queue[bytes] = asyncio.Queue()
+
+        for char in notify_chars:
+            await client.start_notify(char, _make_notification_handler(capture, notification_queue))
+            print(f"notify enabled: {char.uuid}")
+            capture["notifications_enabled"].append(_char_snapshot(char))
+
+        if write_char is None:
+            print("no primary write characteristic found; cannot sync training")
+            return
+
+        mtu_payload = _guess_mtu_payload(client)
+        print("querying training list")
+        await _write_packet(
+            client,
+            write_char,
+            QUERY_HISTORY_TRAINING_DETAIL,
+            write_with_response,
+            mtu_payload,
+            capture,
+        )
+        training_ids = await _wait_for_training_list_response(notification_queue, chunk_timeout)
+        if not training_ids:
+            print(f"no training list response within {chunk_timeout:.1f}s")
+            return
+        print(f"training ids: {training_ids}")
+
+        for training_id in training_ids:
+            print(f"querying training detail id: {training_id}")
+            await _write_packet(
+                client,
+                write_char,
+                query_training_detail_packet(training_id),
+                write_with_response,
+                mtu_payload,
+                capture,
+            )
+            detail_ok = await _wait_for_training_detail_response(
+                notification_queue,
+                training_id,
+                chunk_timeout,
+            )
+            if not detail_ok:
+                print(f"no detail response for id={training_id} within {chunk_timeout:.1f}s")
+                continue
+            for kind in kinds:
+                await _query_training_series_kind(
+                    client,
+                    write_char,
+                    write_with_response,
+                    mtu_payload,
+                    training_id,
+                    kind,
+                    0,
+                    chunk_timeout,
+                    notification_queue,
+                    capture,
+                )
+
+        for char in notify_chars:
+            await client.stop_notify(char)
+
+
 async def _read_device_info(
     device: BLEDevice | str,
     timeout: float,
@@ -894,6 +1068,61 @@ async def _wait_for_training_series_response(
         if frame.payload[0] != response_subcommand or frame.payload[1] != training_id:
             continue
         return int.from_bytes(frame.payload[2:4], "big")
+
+
+async def _wait_for_training_list_response(
+    notification_queue: asyncio.Queue[bytes],
+    timeout: float,
+) -> list[int] | None:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while True:
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            return None
+        try:
+            raw = await asyncio.wait_for(notification_queue.get(), timeout=remaining)
+        except TimeoutError:
+            return None
+        frame = parse_frame(raw)
+        if frame is None or frame.command != 0xB2 or not frame.payload:
+            continue
+        if frame.payload[0] != 0x01:
+            continue
+        return _training_ids_from_list_payload(frame.payload)
+
+
+async def _wait_for_training_detail_response(
+    notification_queue: asyncio.Queue[bytes],
+    training_id: int,
+    timeout: float,
+) -> bool:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while True:
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            return False
+        try:
+            raw = await asyncio.wait_for(notification_queue.get(), timeout=remaining)
+        except TimeoutError:
+            return False
+        frame = parse_frame(raw)
+        if frame is None or frame.command != 0xB2 or len(frame.payload) < 2:
+            continue
+        if frame.payload[0] == 0x03 and frame.payload[1] == training_id:
+            return True
+
+
+def _training_ids_from_list_payload(payload: bytes) -> list[int]:
+    if len(payload) % 5 != 1:
+        return []
+    training_ids = []
+    for offset in range(1, len(payload), 5):
+        timestamp = int.from_bytes(payload[offset : offset + 4], "little")
+        if timestamp > 1:
+            training_ids.append(offset // 5)
+    return training_ids
 
 
 def _handle_notification(

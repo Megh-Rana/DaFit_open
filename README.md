@@ -65,6 +65,7 @@ Query stored workout details after `health-history` reports training IDs:
 ```bash
 dafit-open training-detail AA:BB:CC:DD:EE:FF 11 12 13 14
 dafit-open training-series AA:BB:CC:DD:EE:FF 11 --kind all
+dafit-open sync-training AA:BB:CC:DD:EE:FF --json-out ble-logs/training-sync.json
 ```
 
 Set the active watch-face slot after confirming the slot list:
