@@ -26,7 +26,14 @@ def main() -> None:
     probe_parser.add_argument("--json-out", help="write a structured JSON capture")
     probe_parser.add_argument(
         "--query-set",
-        choices=["default", "health-basic", "watchface", "watchface-support"],
+        choices=[
+            "default",
+            "health-basic",
+            "health-extended",
+            "health-history",
+            "watchface",
+            "watchface-support",
+        ],
         default="default",
     )
 

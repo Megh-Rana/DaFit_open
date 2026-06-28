@@ -19,27 +19,34 @@ decompiled app. They are not copied app code.
 
 ## Read-Oriented Query Packets
 
-The `health-basic` probe query set sends these packets:
+The `health-history` probe query set sends the packets that answered on
+FireBoltt 148:
 
 - Goal step: `0x26`, no payload
-- Sleep time: `0xB8`, payload `03`
-- History step marker for today: `0x33`, payload `00`
-- History step detail for today: `0xB6`, payload `00 00`
 - History heart rate: `0xAB`, payload `00`
 - History blood pressure: `0xAB`, payload `01`
 - History blood oxygen: `0xAB`, payload `02`
+- History training detail/list cursor: `0xB2`, payload `00`
+
+The `health-extended` probe query set sends timing/last-24h candidates that
+were silent in early FireBoltt 148 captures:
+
+- Sleep time: `0xB8`, payload `03`
+- History step marker for today: `0x33`, payload `00`
+- History step detail for today: `0xB6`, payload `00 00`
 - Last 24h blood pressure: `0x3D`, payload `00`
 - Last 24h blood oxygen: `0x3E`, payload `00`
 - Movement heart rate: `0x37`, no payload
 - History training list: `0xB2`, payload `06`
-- History training detail/list cursor: `0xB2`, payload `00`
+
+The `health-basic` query set sends both groups.
 
 Run:
 
 ```bash
 dafit-open probe D3:05:F5:F9:B3:E5 --timeout 30 --retries 1 \
-  --query-set health-basic \
-  --json-out ble-logs/fireboltt148-health-basic.json
+  --query-set health-history \
+  --json-out ble-logs/fireboltt148-health-history.json
 ```
 
 ## Decompiled References
@@ -96,7 +103,13 @@ Responses:
 - Training query `0xB2 00` returned a payload beginning with `01` and containing
   several plausible Unix timestamps. The non-timestamp fields are still unknown.
 
-Silent in this run:
+The same response set repeated in a second `health-basic` capture:
+
+- `0x26`, `0xAB 00`, `0xAB 01`, `0xAB 02`, and `0xB2 00` answered.
+- The decoded heart-rate, blood-pressure, blood-oxygen, and training payloads
+  matched the first capture.
+
+Silent in both runs:
 
 - Sleep time `0xB8 03`
 - History step marker `0x33 00`

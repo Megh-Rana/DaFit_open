@@ -55,7 +55,9 @@ dafit-open probe AA:BB:CC:DD:EE:FF --query-set watchface-support
 Run read-oriented health/data discovery queries:
 
 ```bash
+dafit-open probe AA:BB:CC:DD:EE:FF --query-set health-history
 dafit-open probe AA:BB:CC:DD:EE:FF --query-set health-basic
+dafit-open probe AA:BB:CC:DD:EE:FF --query-set health-extended
 ```
 
 Set the active watch-face slot after confirming the slot list:
