@@ -428,6 +428,7 @@ async def training_series(
     training_id: int,
     kinds: list[str],
     offset: int = 0,
+    chunk_timeout: float = 6.0,
     timeout: float = 45.0,
     scan_timeout: float = 10.0,
     retries: int = 3,
@@ -439,7 +440,7 @@ async def training_series(
         raise ValueError(f"training id must be between 0 and 255: {training_id}")
     if not 0 <= offset <= 0xFFFF:
         raise ValueError(f"training series offset must be between 0 and 65535: {offset}")
-    if kinds == ["all"]:
+    if "all" in kinds:
         kinds = ["heart-rate", "steps", "distance"]
 
     capture = _new_capture(
@@ -449,6 +450,7 @@ async def training_series(
             "training_id": training_id,
             "kinds": kinds,
             "offset": offset,
+            "chunk_timeout": chunk_timeout,
             "timeout": timeout,
             "scan_timeout": scan_timeout,
             "retries": retries,
@@ -479,6 +481,7 @@ async def training_series(
                 training_id,
                 kinds,
                 offset,
+                chunk_timeout,
                 timeout,
                 pair=pair,
                 capture=capture,
@@ -689,6 +692,7 @@ async def _training_series_device(
     training_id: int,
     kinds: list[str],
     offset: int,
+    chunk_timeout: float,
     timeout: float,
     pair: bool,
     capture: dict[str, Any],
@@ -716,8 +720,10 @@ async def _training_series_device(
 
         capture["services"] = _services_snapshot(services)
 
+        notification_queue: asyncio.Queue[bytes] = asyncio.Queue()
+
         for char in notify_chars:
-            await client.start_notify(char, _make_notification_handler(capture))
+            await client.start_notify(char, _make_notification_handler(capture, notification_queue))
             print(f"notify enabled: {char.uuid}")
             capture["notifications_enabled"].append(_char_snapshot(char))
 
@@ -727,17 +733,18 @@ async def _training_series_device(
 
         mtu_payload = _guess_mtu_payload(client)
         for kind in kinds:
-            print(f"querying training {kind} id={training_id} offset={offset}")
-            await _write_packet(
+            await _query_training_series_kind(
                 client,
                 write_char,
-                query_training_series_packet(training_id, kind, offset),
                 write_with_response,
                 mtu_payload,
+                training_id,
+                kind,
+                offset,
+                chunk_timeout,
+                notification_queue,
                 capture,
             )
-            await asyncio.sleep(0.75)
-        await asyncio.sleep(5)
 
         for char in notify_chars:
             await client.stop_notify(char)
@@ -801,11 +808,92 @@ def _notification_handler(sender: object, data: bytearray) -> None:
     _handle_notification(sender, data, capture=None)
 
 
-def _make_notification_handler(capture: dict[str, Any]):
+def _make_notification_handler(
+    capture: dict[str, Any],
+    queue: asyncio.Queue[bytes] | None = None,
+):
     def handler(sender: object, data: bytearray) -> None:
         _handle_notification(sender, data, capture=capture)
+        if queue is not None:
+            queue.put_nowait(bytes(data))
 
     return handler
+
+
+async def _query_training_series_kind(
+    client: BleakClient,
+    write_char: object,
+    write_with_response: bool,
+    mtu_payload: int,
+    training_id: int,
+    kind: str,
+    offset: int,
+    chunk_timeout: float,
+    notification_queue: asyncio.Queue[bytes],
+    capture: dict[str, Any],
+) -> None:
+    response_subcommands = {
+        "heart-rate": 0x05,
+        "steps": 0x08,
+        "distance": 0x0A,
+    }
+    response_subcommand = response_subcommands[kind]
+    current_offset = offset
+    seen_offsets: set[int] = set()
+
+    while True:
+        if current_offset in seen_offsets:
+            print(f"stopping {kind}: repeated offset {current_offset}")
+            return
+        seen_offsets.add(current_offset)
+
+        print(f"querying training {kind} id={training_id} offset={current_offset}")
+        await _write_packet(
+            client,
+            write_char,
+            query_training_series_packet(training_id, kind, current_offset),
+            write_with_response,
+            mtu_payload,
+            capture,
+        )
+
+        next_offset = await _wait_for_training_series_response(
+            notification_queue,
+            training_id,
+            response_subcommand,
+            chunk_timeout,
+        )
+        if next_offset is None:
+            print(f"no {kind} chunk response within {chunk_timeout:.1f}s")
+            return
+        if next_offset == 0xFFFF:
+            print(f"training {kind} complete")
+            return
+        current_offset = next_offset
+
+
+async def _wait_for_training_series_response(
+    notification_queue: asyncio.Queue[bytes],
+    training_id: int,
+    response_subcommand: int,
+    timeout: float,
+) -> int | None:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while True:
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            return None
+        try:
+            raw = await asyncio.wait_for(notification_queue.get(), timeout=remaining)
+        except TimeoutError:
+            return None
+        frame = parse_frame(raw)
+        if frame is None or frame.command != 0xB2 or len(frame.payload) < 4:
+            continue
+        if frame.payload[0] != response_subcommand or frame.payload[1] != training_id:
+            continue
+        return int.from_bytes(frame.payload[2:4], "big")
 
 
 def _handle_notification(

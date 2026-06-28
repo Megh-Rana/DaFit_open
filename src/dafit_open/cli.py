@@ -91,6 +91,12 @@ def main() -> None:
         help="series kind to query; can be repeated",
     )
     training_series_parser.add_argument("--offset", type=int, default=0)
+    training_series_parser.add_argument(
+        "--chunk-timeout",
+        type=float,
+        default=6.0,
+        help="seconds to wait for each training series chunk",
+    )
     training_series_parser.add_argument("--timeout", type=float, default=45.0)
     training_series_parser.add_argument("--scan-timeout", type=float, default=10.0)
     training_series_parser.add_argument("--retries", type=int, default=3)
@@ -161,6 +167,7 @@ def main() -> None:
                 args.id,
                 args.kind or ["all"],
                 args.offset,
+                args.chunk_timeout,
                 args.timeout,
                 args.scan_timeout,
                 args.retries,

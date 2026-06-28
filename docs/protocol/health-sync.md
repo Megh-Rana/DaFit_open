@@ -192,3 +192,15 @@ Next series probe:
 dafit-open training-series D3:05:F5:F9:B3:E5 11 --kind all --timeout 30 \
   --retries 1 --json-out ble-logs/fireboltt148-training-series-11.json
 ```
+
+The first manual `training-series` probe sent heart-rate, steps, and distance
+requests without following the heart-rate cursor. The watch answered only the
+heart-rate request:
+
+- Request: `0xB2`, payload `04 0B 00 00`.
+- Response: `0xB2`, payload begins `05 0B 00 87 ...`.
+- Decoded: training id `11`, next offset `135`, `complete=False`, with 136
+  heart-rate samples in the chunk.
+
+Follow-up series probes should walk each series until the response offset is
+`65535` before starting the next series kind.
