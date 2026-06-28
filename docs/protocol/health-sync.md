@@ -71,3 +71,41 @@ dafit-open probe D3:05:F5:F9:B3:E5 --timeout 30 --retries 1 \
 
 The current Python decoder only labels these frames and captures raw payloads.
 Full parsers should be added only after we collect live samples.
+
+## FireBoltt 148 Health-Basic Capture
+
+Observed from:
+
+```bash
+dafit-open probe D3:05:F5:F9:B3:E5 --timeout 30 --retries 1 \
+  --query-set health-basic \
+  --json-out ble-logs/fireboltt148-health-basic.json
+```
+
+Responses:
+
+- Goal step query `0x26` returned `FE EA 20 09 26 10 27 00 00`, decoded as
+  `goal_step=10000`.
+- History heart-rate query `0xAB 00` returned four records. Observed layout:
+  `kind=00`, then `count`, then repeated `(bpm:uint8, timestamp:uint32-le)`.
+- History blood-pressure query `0xAB 01` returned two records. Observed layout:
+  `kind=01`, then `count`, then repeated
+  `(systolic:uint8, diastolic:uint8, timestamp:uint32-le)`.
+- History blood-oxygen query `0xAB 02` returned `FE EA 20 07 AB 02 00`, decoded
+  as zero records.
+- Training query `0xB2 00` returned a payload beginning with `01` and containing
+  several plausible Unix timestamps. The non-timestamp fields are still unknown.
+
+Silent in this run:
+
+- Sleep time `0xB8 03`
+- History step marker `0x33 00`
+- History step detail `0xB6 00 00`
+- Last 24h blood pressure `0x3D 00`
+- Last 24h blood oxygen `0x3E 00`
+- Movement heart rate `0x37`
+- History training list `0xB2 06`
+
+The `0xAB` history timestamps decode as Unix seconds. Their year/month/day
+values were plausible for existing historical records, so the Python decoder now
+prints them as UTC ISO timestamps.

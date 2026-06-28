@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 
 BLUETOOTH_BASE_SUFFIX = "-0000-1000-8000-00805f9b34fb"
@@ -194,7 +195,21 @@ def decode_history_dynamic(payload: bytes) -> str | None:
     if not payload:
         return None
     labels = {0: "heart_rate", 1: "blood_pressure", 2: "blood_oxygen"}
-    return f"history_{labels.get(payload[0], f'kind_{payload[0]}')} payload={hex_bytes(payload[1:])}"
+    kind = payload[0]
+    data = payload[1:]
+    if kind == 0:
+        records = _decode_counted_records(data, 5, _decode_heart_rate_record)
+        if records is not None:
+            return f"history_heart_rate records={records}"
+    if kind == 1:
+        records = _decode_counted_records(data, 6, _decode_blood_pressure_record)
+        if records is not None:
+            return f"history_blood_pressure records={records}"
+    if kind == 2:
+        records = _decode_counted_records(data, 5, _decode_blood_oxygen_record)
+        if records is not None:
+            return f"history_blood_oxygen records={records}"
+    return f"history_{labels.get(kind, f'kind_{kind}')} payload={hex_bytes(data)}"
 
 
 def decode_training_history(payload: bytes) -> str | None:
@@ -202,7 +217,11 @@ def decode_training_history(payload: bytes) -> str | None:
     if not payload:
         return None
     subcommands = {0: "history_training_detail", 6: "history_training_list"}
-    return f"{subcommands.get(payload[0], 'training_subcommand')} payload={hex_bytes(payload)}"
+    label = subcommands.get(payload[0], "training_subcommand")
+    timestamps = _find_plausible_timestamps(payload)
+    if timestamps:
+        return f"{label} timestamps={timestamps} payload={hex_bytes(payload)}"
+    return f"{label} payload={hex_bytes(payload)}"
 
 
 def decode_sleep_time(payload: bytes) -> str | None:
@@ -228,6 +247,48 @@ def decode_file_transfer_frame(payload: bytes) -> str | None:
         name = payload[6:].decode("utf-8", errors="replace").rstrip("\x00")
         return f"file_transfer_start type={transfer_type} size={size} name={name!r}"
     return f"{labels.get(payload[0], 'file_transfer')} payload={hex_bytes(payload)}"
+
+
+def _decode_counted_records(data: bytes, record_size: int, decoder) -> list[str] | None:
+    if not data:
+        return []
+    count = data[0]
+    records_data = data[1:]
+    if len(records_data) != count * record_size:
+        return None
+    return [decoder(records_data[offset : offset + record_size]) for offset in range(0, len(records_data), record_size)]
+
+
+def _decode_heart_rate_record(record: bytes) -> str:
+    bpm = record[0]
+    timestamp = int.from_bytes(record[1:5], "little")
+    return f"bpm={bpm}@{_format_timestamp(timestamp)}"
+
+
+def _decode_blood_pressure_record(record: bytes) -> str:
+    systolic = record[0]
+    diastolic = record[1]
+    timestamp = int.from_bytes(record[2:6], "little")
+    return f"{systolic}/{diastolic}@{_format_timestamp(timestamp)}"
+
+
+def _decode_blood_oxygen_record(record: bytes) -> str:
+    spo2 = record[0]
+    timestamp = int.from_bytes(record[1:5], "little")
+    return f"spo2={spo2}@{_format_timestamp(timestamp)}"
+
+
+def _find_plausible_timestamps(data: bytes) -> list[str]:
+    timestamps = []
+    for offset in range(0, max(0, len(data) - 3)):
+        value = int.from_bytes(data[offset : offset + 4], "little")
+        if 1_577_836_800 <= value <= 2_051_222_400:
+            timestamps.append(f"offset={offset}:{_format_timestamp(value)}")
+    return timestamps
+
+
+def _format_timestamp(timestamp: int) -> str:
+    return datetime.fromtimestamp(timestamp, UTC).isoformat()
 
 
 def decode_support_watch_faces(payload: bytes) -> str | None:
