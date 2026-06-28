@@ -52,6 +52,12 @@ dafit-open probe AA:BB:CC:DD:EE:FF --query-set watchface
 dafit-open probe AA:BB:CC:DD:EE:FF --query-set watchface-support
 ```
 
+Run read-oriented health/data discovery queries:
+
+```bash
+dafit-open probe AA:BB:CC:DD:EE:FF --query-set health-basic
+```
+
 Set the active watch-face slot after confirming the slot list:
 
 ```bash
@@ -99,3 +105,5 @@ captures for later analysis.
 - `src/dafit_open/protocol.py`: packet framing and known UUID constants.
 - `src/dafit_open/ble_probe.py`: BLE scan/connect/probe logic.
 - `docs/protocol/discovery.md`: current reverse-engineering notes.
+- `docs/protocol/health-sync.md`: health/data sync packet notes.
+- `docs/protocol/watchface-transfer.md`: watch-face transfer packet notes.

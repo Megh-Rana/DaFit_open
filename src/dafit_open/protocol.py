@@ -122,10 +122,30 @@ def parse_frame(data: bytes) -> Frame | None:
 def decode_frame(frame: Frame) -> str | None:
     if frame.command == 0x19 and frame.payload:
         return f"display_watch_face_set={frame.payload[0]}"
+    if frame.command == 0x26:
+        return decode_goal_step(frame.payload)
     if frame.command == 0x2E and frame.payload:
         return f"device_version={frame.payload[0]}"
+    if frame.command == 0x33:
+        return decode_history_step_sleep_marker(frame.payload)
+    if frame.command == 0x37:
+        return f"movement_heart_rate payload={hex_bytes(frame.payload)}"
+    if frame.command == 0x3D:
+        return f"last_24h_blood_pressure payload={hex_bytes(frame.payload)}"
+    if frame.command == 0x3E:
+        return f"last_24h_blood_oxygen payload={hex_bytes(frame.payload)}"
     if frame.command == 0x29 and frame.payload:
         return f"display_watch_face={frame.payload[0]}"
+    if frame.command == 0xAB:
+        return decode_history_dynamic(frame.payload)
+    if frame.command == 0xB2:
+        return decode_training_history(frame.payload)
+    if frame.command == 0xB6:
+        return decode_history_step_sleep_detail(frame.payload)
+    if frame.command == 0xB7:
+        return decode_file_transfer_frame(frame.payload)
+    if frame.command == 0xB8:
+        return decode_sleep_time(frame.payload)
     if frame.command == 0x84:
         return decode_support_watch_faces(frame.payload)
     if frame.command == 0xA6:
@@ -139,6 +159,75 @@ def decode_frame(frame: Frame) -> str | None:
     if frame.command == 0xB4:
         return decode_watch_face_subcommand(frame.payload)
     return None
+
+
+def decode_goal_step(payload: bytes) -> str | None:
+    payload = bytes(payload)
+    if not payload:
+        return "goal_step=<empty>"
+    value = int.from_bytes(payload[:4], byteorder="little", signed=False)
+    return f"goal_step={value} payload={hex_bytes(payload)}"
+
+
+def decode_history_step_sleep_marker(payload: bytes) -> str | None:
+    payload = bytes(payload)
+    if not payload:
+        return None
+    marker = payload[0]
+    if marker <= 2:
+        return f"history_step day={marker} payload={hex_bytes(payload[1:])}"
+    return f"history_sleep_marker marker={marker} payload={hex_bytes(payload[1:])}"
+
+
+def decode_history_step_sleep_detail(payload: bytes) -> str | None:
+    payload = bytes(payload)
+    if len(payload) < 2:
+        return None
+    kind = payload[0]
+    day = payload[1]
+    labels = {0: "step", 1: "sleep", 2: "timing_heart_rate"}
+    return f"history_{labels.get(kind, f'kind_{kind}')} day={day} payload={hex_bytes(payload[2:])}"
+
+
+def decode_history_dynamic(payload: bytes) -> str | None:
+    payload = bytes(payload)
+    if not payload:
+        return None
+    labels = {0: "heart_rate", 1: "blood_pressure", 2: "blood_oxygen"}
+    return f"history_{labels.get(payload[0], f'kind_{payload[0]}')} payload={hex_bytes(payload[1:])}"
+
+
+def decode_training_history(payload: bytes) -> str | None:
+    payload = bytes(payload)
+    if not payload:
+        return None
+    subcommands = {0: "history_training_detail", 6: "history_training_list"}
+    return f"{subcommands.get(payload[0], 'training_subcommand')} payload={hex_bytes(payload)}"
+
+
+def decode_sleep_time(payload: bytes) -> str | None:
+    payload = bytes(payload)
+    if len(payload) >= 3 and payload[0] == 3:
+        return f"sleep_time start_hour={payload[1]} end_hour={payload[2]}"
+    return f"sleep_time payload={hex_bytes(payload)}"
+
+
+def decode_file_transfer_frame(payload: bytes) -> str | None:
+    payload = bytes(payload)
+    if not payload:
+        return None
+    labels = {
+        0: "file_transfer_start",
+        3: "file_transfer_check_ok",
+        4: "file_transfer_check_failed",
+        5: "file_transfer_abort",
+    }
+    if payload[0] == 0 and len(payload) >= 6:
+        transfer_type = payload[1]
+        size = int.from_bytes(payload[2:6], byteorder="little", signed=False)
+        name = payload[6:].decode("utf-8", errors="replace").rstrip("\x00")
+        return f"file_transfer_start type={transfer_type} size={size} name={name!r}"
+    return f"{labels.get(payload[0], 'file_transfer')} payload={hex_bytes(payload)}"
 
 
 def decode_support_watch_faces(payload: bytes) -> str | None:
@@ -211,6 +300,23 @@ def set_display_watch_face_packet(index: int) -> Packet:
     return Packet(0x19, bytes([index]))
 
 
+def watch_face_transfer_prepare_packet(total_size: int, file_count: int) -> Packet:
+    if not 0 <= total_size <= 0xFFFFFFFF:
+        raise ValueError(f"total size must fit in uint32: {total_size}")
+    if not 0 <= file_count <= 0xFF:
+        raise ValueError(f"file count must fit in one byte: {file_count}")
+    return Packet(0xB4, bytes([0x01]) + total_size.to_bytes(4, "little") + bytes([file_count]))
+
+
+def file_transfer_start_packet(transfer_type: int, size: int, name: str) -> Packet:
+    if not 0 <= transfer_type <= 0xFF:
+        raise ValueError(f"transfer type must fit in one byte: {transfer_type}")
+    if not 0 <= size <= 0xFFFFFFFF:
+        raise ValueError(f"size must fit in uint32: {size}")
+    encoded_name = name.encode("utf-8")[:160]
+    return Packet(0xB7, bytes([0x00, transfer_type]) + size.to_bytes(4, "little") + encoded_name)
+
+
 SET_DISPLAY_WATCH_FACE_COMMAND = 0x19
 QUERY_DEVICE_VERSION = Packet(0x2E)
 QUERY_DISPLAY_WATCH_FACE = Packet(0x29)
@@ -221,6 +327,18 @@ QUERY_SUPPORT_WATCH_FACE_BASE = Packet(0xB4, bytes([0x00]))
 QUERY_JIELI_DOWNLOAD_WATCH_FACE_LIST = Packet(0xB4, bytes([0x12]))
 QUERY_JIELI_SUPPORT_WATCH_FACE = Packet(0xB4, bytes([0x10]))
 QUERY_HISILICON_SUPPORT_WATCH_FACE = Packet(0xB4, bytes([0x20]))
+QUERY_GOAL_STEP = Packet(0x26)
+QUERY_SLEEP_TIME = Packet(0xB8, bytes([0x03]))
+QUERY_HISTORY_STEP_TODAY = Packet(0x33, bytes([0x00]))
+QUERY_HISTORY_STEP_DETAIL_TODAY = Packet(0xB6, bytes([0x00, 0x00]))
+QUERY_HISTORY_HEART_RATE = Packet(0xAB, bytes([0x00]))
+QUERY_HISTORY_BLOOD_PRESSURE = Packet(0xAB, bytes([0x01]))
+QUERY_HISTORY_BLOOD_OXYGEN = Packet(0xAB, bytes([0x02]))
+QUERY_LAST_24H_BLOOD_PRESSURE = Packet(0x3D, bytes([0x00]))
+QUERY_LAST_24H_BLOOD_OXYGEN = Packet(0x3E, bytes([0x00]))
+QUERY_MOVEMENT_HEART_RATE = Packet(0x37)
+QUERY_HISTORY_TRAINING_LIST = Packet(0xB2, bytes([0x06]))
+QUERY_HISTORY_TRAINING_DETAIL = Packet(0xB2, bytes([0x00]))
 
 DEFAULT_QUERY_PACKETS = [
     QUERY_DEVICE_VERSION,
@@ -242,8 +360,24 @@ WATCH_FACE_SUPPORT_QUERY_PACKETS = [
     QUERY_WATCH_FACE_SCREEN,
 ]
 
+HEALTH_BASIC_QUERY_PACKETS = [
+    QUERY_GOAL_STEP,
+    QUERY_SLEEP_TIME,
+    QUERY_HISTORY_STEP_TODAY,
+    QUERY_HISTORY_STEP_DETAIL_TODAY,
+    QUERY_HISTORY_HEART_RATE,
+    QUERY_HISTORY_BLOOD_PRESSURE,
+    QUERY_HISTORY_BLOOD_OXYGEN,
+    QUERY_LAST_24H_BLOOD_PRESSURE,
+    QUERY_LAST_24H_BLOOD_OXYGEN,
+    QUERY_MOVEMENT_HEART_RATE,
+    QUERY_HISTORY_TRAINING_LIST,
+    QUERY_HISTORY_TRAINING_DETAIL,
+]
+
 QUERY_SETS = {
     "default": DEFAULT_QUERY_PACKETS,
+    "health-basic": HEALTH_BASIC_QUERY_PACKETS,
     "watchface": WATCH_FACE_QUERY_PACKETS,
     "watchface-support": WATCH_FACE_SUPPORT_QUERY_PACKETS,
 }

@@ -322,6 +322,12 @@ Confirmed on FireBoltt 148:
 - Follow-up `0x29` query returned `FE EA 20 06 29 05`, parsed as
   `display_watch_face=5`.
 - The watch face visibly changed on the device.
+- Sending slot `6` also worked and restored the previous active slot.
+
+Further notes:
+
+- Health/data sync packet map: `docs/protocol/health-sync.md`
+- Watch-face transfer packet map: `docs/protocol/watchface-transfer.md`
 
 ## FireBoltt 148 Device Info Capture
 
