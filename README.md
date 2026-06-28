@@ -92,6 +92,12 @@ dafit-open export-captures ble-logs --format csv --output exports/workouts.csv
 dafit-open export-captures ble-logs --no-samples
 ```
 
+Browse captured workout data in a read-only terminal UI:
+
+```bash
+dafit-open tui ble-logs
+```
+
 For Linux/BlueZ connection timeouts, keep the watch awake/nearby and try:
 
 ```bash
@@ -123,8 +129,8 @@ captures for later analysis.
 ## Interface Plan
 
 - CLI remains the primary testing and automation interface.
-- A future TUI should call the same capture/export and BLE functions instead of
-  reimplementing protocol parsing.
+- The TUI is read-only for now and calls the same capture/export model instead
+  of reimplementing protocol parsing.
 - A future Android app should sit on top of the same clean-room protocol model
   once data collection, watch-face transfer, and sync flows are stable.
 

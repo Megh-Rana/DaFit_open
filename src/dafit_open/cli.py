@@ -15,6 +15,7 @@ from .ble_probe import (
     training_series,
 )
 from .capture_export import load_workout_summaries, write_workout_export
+from .tui import run_capture_tui
 
 
 def main() -> None:
@@ -155,6 +156,16 @@ def main() -> None:
         help="omit sample arrays from JSON output",
     )
 
+    tui_parser = subparsers.add_parser(
+        "tui",
+        help="browse captured workout summaries in a terminal UI",
+    )
+    tui_parser.add_argument(
+        "paths",
+        nargs="*",
+        help="capture files or directories; defaults to ble-logs/",
+    )
+
     args = parser.parse_args()
     if args.command == "scan":
         asyncio.run(scan(args.timeout, args.verbose))
@@ -249,6 +260,8 @@ def main() -> None:
             output=args.output,
             include_samples=not args.no_samples,
         )
+    elif args.command == "tui":
+        run_capture_tui(args.paths)
 
 
 if __name__ == "__main__":
