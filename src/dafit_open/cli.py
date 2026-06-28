@@ -13,9 +13,12 @@ from .ble_probe import (
     sync_training,
     training_detail,
     training_series,
+    watch_faces,
 )
 from .capture_export import load_workout_summaries, write_workout_export
+from .state_export import load_app_state, write_app_state
 from .tui import run_capture_tui
+from .watchface_export import load_watch_face_state, write_watch_face_export
 
 
 def main() -> None:
@@ -73,6 +76,29 @@ def main() -> None:
         action="store_true",
         help="required because this changes watch state",
     )
+
+    watch_faces_parser = subparsers.add_parser(
+        "watch-faces",
+        help="query installed/current watch-face state",
+    )
+    watch_faces_parser.add_argument("address")
+    watch_faces_parser.add_argument("--timeout", type=float, default=45.0)
+    watch_faces_parser.add_argument("--scan-timeout", type=float, default=10.0)
+    watch_faces_parser.add_argument("--retries", type=int, default=3)
+    watch_faces_parser.add_argument("--pair", action="store_true")
+    watch_faces_parser.add_argument("--direct", action="store_true")
+    watch_faces_parser.add_argument(
+        "--wait-timeout",
+        type=float,
+        default=3.0,
+        help="seconds to wait for each watch-face response",
+    )
+    watch_faces_parser.add_argument(
+        "--extended",
+        action="store_true",
+        help="also send extra read-only watch-face support probes",
+    )
+    watch_faces_parser.add_argument("--json-out", help="write a structured JSON capture")
 
     training_detail_parser = subparsers.add_parser(
         "training-detail",
@@ -156,6 +182,33 @@ def main() -> None:
         help="omit sample arrays from JSON output",
     )
 
+    export_faces_parser = subparsers.add_parser(
+        "export-watch-faces",
+        help="export watch-face state from JSON captures",
+    )
+    export_faces_parser.add_argument(
+        "paths",
+        nargs="*",
+        help="capture files or directories; defaults to ble-logs/",
+    )
+    export_faces_parser.add_argument("--output", help="write export to a file instead of stdout")
+
+    export_state_parser = subparsers.add_parser(
+        "export-state",
+        help="export an app-ready device/watch-face/workout state document",
+    )
+    export_state_parser.add_argument(
+        "paths",
+        nargs="*",
+        help="capture files or directories; defaults to ble-logs/",
+    )
+    export_state_parser.add_argument("--output", help="write export to a file instead of stdout")
+    export_state_parser.add_argument(
+        "--include-samples",
+        action="store_true",
+        help="include workout sample arrays in the exported state",
+    )
+
     tui_parser = subparsers.add_parser(
         "tui",
         help="browse captured workout summaries in a terminal UI",
@@ -206,6 +259,20 @@ def main() -> None:
                 args.retries,
                 pair=args.pair,
                 direct=args.direct,
+                json_out=args.json_out,
+            )
+        )
+    elif args.command == "watch-faces":
+        asyncio.run(
+            watch_faces(
+                args.address,
+                args.timeout,
+                args.scan_timeout,
+                args.retries,
+                pair=args.pair,
+                direct=args.direct,
+                wait_timeout=args.wait_timeout,
+                extended=args.extended,
                 json_out=args.json_out,
             )
         )
@@ -260,6 +327,12 @@ def main() -> None:
             output=args.output,
             include_samples=not args.no_samples,
         )
+    elif args.command == "export-watch-faces":
+        state = load_watch_face_state(args.paths)
+        write_watch_face_export(state, output=args.output)
+    elif args.command == "export-state":
+        state = load_app_state(args.paths, include_samples=args.include_samples)
+        write_app_state(state, output=args.output)
     elif args.command == "tui":
         run_capture_tui(args.paths)
 

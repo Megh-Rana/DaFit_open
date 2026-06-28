@@ -3,6 +3,9 @@ import unittest
 from dafit_open.protocol import (
     decode_frame,
     parse_frame,
+    parse_display_watch_face,
+    parse_support_watch_faces,
+    parse_watch_face_screen,
     query_training_detail_packet,
     query_training_series_packet,
 )
@@ -97,6 +100,23 @@ class ProtocolDecodeTest(unittest.TestCase):
             query_training_series_packet(11, "distance", 20).build(),
             bytes.fromhex("FE EA 10 09 B2 09 0B 00 14"),
         )
+
+    def test_parses_watch_face_state_payloads(self) -> None:
+        self.assertEqual(parse_display_watch_face(bytes.fromhex("06")), 6)
+
+        support = parse_support_watch_faces(bytes.fromhex("FF FF 40"))
+        self.assertIsNotNone(support)
+        self.assertEqual(support.display_index, 65535)
+        self.assertEqual(support.supported, [64])
+
+        screen = parse_watch_face_screen(bytes.fromhex("14 F0 00 F0 00 10 00 50 00 50 00 08 00"))
+        self.assertIsNotNone(screen)
+        self.assertEqual(screen.width, 240)
+        self.assertEqual(screen.height, 240)
+        self.assertEqual(screen.corner, 16)
+        self.assertEqual(screen.thumb_width, 80)
+        self.assertEqual(screen.thumb_height, 80)
+        self.assertEqual(screen.thumb_corner, 8)
 
 
 if __name__ == "__main__":

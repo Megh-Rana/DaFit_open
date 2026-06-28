@@ -24,12 +24,21 @@ from .protocol import (
     CRP_WRITE_PRIMARY,
     HEART_RATE_MEASUREMENT,
     Packet,
+    QUERY_DEVICE_VERSION,
     QUERY_DISPLAY_WATCH_FACE,
     QUERY_HISTORY_TRAINING_DETAIL,
     QUERY_SETS,
+    QUERY_SUPPORT_WATCH_FACE,
+    QUERY_WATCH_FACE_LIST,
+    QUERY_WATCH_FACE_SCREEN,
+    WATCH_FACE_SUPPORT_QUERY_PACKETS,
     decode_frame,
     hex_bytes,
+    parse_display_watch_face,
     parse_frame,
+    parse_support_watch_faces,
+    parse_watch_face_list,
+    parse_watch_face_screen,
     query_training_detail_packet,
     query_training_series_packet,
     set_display_watch_face_packet,
@@ -347,6 +356,83 @@ async def set_watch_face(
                     capture["device"] = _device_snapshot(refreshed)
 
     print("set-watch-face failed after all retries")
+    if last_error is not None:
+        print(f"last error: {type(last_error).__name__}: {last_error}")
+    _write_capture(json_out, capture)
+
+
+async def watch_faces(
+    address: str,
+    timeout: float = 45.0,
+    scan_timeout: float = 10.0,
+    retries: int = 3,
+    pair: bool = False,
+    direct: bool = False,
+    wait_timeout: float = 3.0,
+    extended: bool = False,
+    json_out: str | None = None,
+) -> None:
+    capture = _new_capture(
+        "watch-faces",
+        address,
+        {
+            "timeout": timeout,
+            "scan_timeout": scan_timeout,
+            "retries": retries,
+            "pair": pair,
+            "direct": direct,
+            "wait_timeout": wait_timeout,
+            "extended": extended,
+        },
+    )
+    device: BLEDevice | str
+    if direct:
+        print(f"using direct address connection for {address}")
+        device = address
+    else:
+        found_device = await _find_device(address, scan_timeout)
+        if found_device is None:
+            print(f"device not found during {scan_timeout:.1f}s scan: {address}")
+            _write_capture(json_out, capture)
+            return
+        device = found_device
+        capture["device"] = _device_snapshot(device)
+
+    last_error: BaseException | None = None
+    for attempt in range(1, retries + 1):
+        try:
+            print(f"connecting to {_device_label(device)}, attempt {attempt}/{retries}")
+            capture["attempts"].append({"attempt": attempt, "device": _device_label(device)})
+            await _watch_faces_device(
+                device,
+                timeout,
+                pair=pair,
+                wait_timeout=wait_timeout,
+                extended=extended,
+                capture=capture,
+            )
+            _write_capture(json_out, capture)
+            return
+        except TimeoutError as exc:
+            last_error = exc
+            print(f"connect timed out after {timeout:.1f}s")
+            capture["errors"].append({"attempt": attempt, "type": "TimeoutError", "message": str(exc)})
+        except Exception as exc:
+            last_error = exc
+            print(f"watch-faces failed: {type(exc).__name__}: {exc}")
+            capture["errors"].append(
+                {"attempt": attempt, "type": type(exc).__name__, "message": str(exc)}
+            )
+
+        if attempt < retries:
+            await asyncio.sleep(2)
+            if not direct:
+                refreshed = await _find_device(address, scan_timeout)
+                if refreshed is not None:
+                    device = refreshed
+                    capture["device"] = _device_snapshot(refreshed)
+
+    print("watch-faces failed after all retries")
     if last_error is not None:
         print(f"last error: {type(last_error).__name__}: {last_error}")
     _write_capture(json_out, capture)
@@ -711,6 +797,71 @@ async def _set_watch_face_device(
             await client.stop_notify(char)
 
 
+async def _watch_faces_device(
+    device: BLEDevice | str,
+    timeout: float,
+    pair: bool,
+    wait_timeout: float,
+    extended: bool,
+    capture: dict[str, Any],
+) -> None:
+    async with BleakClient(device, timeout=timeout, pair=pair) as client:
+        print(f"connected: {client.is_connected}")
+        capture["connected"] = client.is_connected
+
+        services = client.services
+        write_char = None
+        write_with_response = True
+        notify_chars = []
+
+        for service in services:
+            print(f"service {service.uuid}")
+            for char in service.characteristics:
+                props = ",".join(char.properties)
+                print(f"  char {char.uuid} [{props}]")
+                uuid = char.uuid.lower()
+                if uuid == CRP_WRITE_PRIMARY and _can_write(char.properties):
+                    write_char = char
+                    write_with_response = "write" in char.properties
+                if uuid in NOTIFY_UUIDS and "notify" in char.properties:
+                    notify_chars.append(char)
+
+        capture["services"] = _services_snapshot(services)
+        notification_queue: asyncio.Queue[bytes] = asyncio.Queue()
+
+        for char in notify_chars:
+            await client.start_notify(char, _make_notification_handler(capture, notification_queue))
+            print(f"notify enabled: {char.uuid}")
+            capture["notifications_enabled"].append(_char_snapshot(char))
+
+        if write_char is None:
+            print("no primary write characteristic found; cannot query watch faces")
+            return
+
+        capture["watch_faces"] = {
+            "device_version": None,
+            "display_slot": None,
+            "slots": [],
+            "support": None,
+            "screen": None,
+            "unanswered": [],
+        }
+        mtu_payload = _guess_mtu_payload(client)
+        await _query_watch_face_state(
+            client,
+            write_char,
+            write_with_response,
+            mtu_payload,
+            wait_timeout,
+            extended,
+            notification_queue,
+            capture,
+        )
+
+        for char in notify_chars:
+            await client.stop_notify(char)
+
+
 async def _training_detail_device(
     device: BLEDevice | str,
     training_ids: list[int],
@@ -994,6 +1145,120 @@ def _make_notification_handler(
     return handler
 
 
+async def _query_watch_face_state(
+    client: BleakClient,
+    write_char: object,
+    write_with_response: bool,
+    mtu_payload: int,
+    wait_timeout: float,
+    extended: bool,
+    notification_queue: asyncio.Queue[bytes],
+    capture: dict[str, Any],
+) -> None:
+    queries = [
+        ("device version", QUERY_DEVICE_VERSION, 0x2E),
+        ("current display slot", QUERY_DISPLAY_WATCH_FACE, 0x29),
+        ("installed watch-face slots", QUERY_WATCH_FACE_LIST, 0xA6),
+        ("watch-face support", QUERY_SUPPORT_WATCH_FACE, 0x84),
+        ("watch-face screen", QUERY_WATCH_FACE_SCREEN, 0xB4),
+    ]
+    if extended:
+        queries.extend(
+            [
+                (f"extended watch-face 0xB4 {packet.payload[0]:02X}", packet, 0xB4)
+                for packet in WATCH_FACE_SUPPORT_QUERY_PACKETS
+                if packet.command == 0xB4
+                and packet.payload
+                and packet.payload != QUERY_WATCH_FACE_SCREEN.payload
+            ]
+        )
+
+    for label, packet, response_command in queries:
+        print(f"querying {label}")
+        await _write_packet(
+            client,
+            write_char,
+            packet,
+            write_with_response,
+            mtu_payload,
+            capture,
+        )
+        frame = await _wait_for_command_response(
+            notification_queue,
+            response_command,
+            wait_timeout,
+            predicate=_watch_face_response_predicate(packet),
+        )
+        if frame is None:
+            print(f"no {label} response within {wait_timeout:.1f}s")
+            capture["watch_faces"]["unanswered"].append(
+                {"command": packet.command, "payload_hex": hex_bytes(packet.payload), "label": label}
+            )
+            continue
+        _merge_watch_face_response(capture["watch_faces"], frame)
+
+    _print_watch_face_summary(capture["watch_faces"])
+
+
+def _watch_face_response_predicate(packet: Packet):
+    if packet.command != 0xB4:
+        return None
+    if not packet.payload:
+        return None
+    expected_subcommand = packet.payload[0]
+
+    def predicate(frame) -> bool:
+        return bool(frame.payload and frame.payload[0] == expected_subcommand)
+
+    return predicate
+
+
+def _merge_watch_face_response(summary: dict[str, Any], frame) -> None:
+    if frame.command == 0x29:
+        summary["display_slot"] = parse_display_watch_face(frame.payload)
+    elif frame.command == 0xA6:
+        slots = parse_watch_face_list(frame.payload)
+        if slots is not None:
+            summary["slots"] = [slot.to_dict() for slot in slots]
+    elif frame.command == 0x84:
+        support = parse_support_watch_faces(frame.payload)
+        if support is not None:
+            summary["support"] = support.to_dict()
+    elif frame.command == 0xB4:
+        screen = parse_watch_face_screen(frame.payload)
+        if screen is not None:
+            summary["screen"] = screen.to_dict()
+    elif frame.command == 0x2E and frame.payload:
+        summary["device_version"] = frame.payload[0]
+
+
+def _print_watch_face_summary(summary: dict[str, Any]) -> None:
+    print("watch-face summary:")
+    print(f"  current slot: {_display_value(summary.get('display_slot'))}")
+    slots = summary.get("slots") or []
+    if slots:
+        print("  installed slots:")
+        for slot in slots:
+            marker = "*" if slot.get("index") == summary.get("display_slot") else " "
+            print(
+                f"  {marker} index={slot.get('index')} "
+                f"type={slot.get('kind')} id={slot.get('watch_face_id')}"
+            )
+    else:
+        print("  installed slots: <none>")
+    print(f"  support: {_display_value(summary.get('support'))}")
+    print(f"  screen: {_display_value(summary.get('screen'))}")
+    unanswered = summary.get("unanswered") or []
+    if unanswered:
+        print(f"  unanswered probes: {len(unanswered)}")
+
+
+def _display_value(value: object | None) -> str:
+    if value is None:
+        return "<unknown>"
+    return str(value)
+
+
 async def _query_training_series_kind(
     client: BleakClient,
     write_char: object,
@@ -1068,6 +1333,30 @@ async def _wait_for_training_series_response(
         if frame.payload[0] != response_subcommand or frame.payload[1] != training_id:
             continue
         return int.from_bytes(frame.payload[2:4], "big")
+
+
+async def _wait_for_command_response(
+    notification_queue: asyncio.Queue[bytes],
+    command: int,
+    timeout: float,
+    predicate=None,
+):
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while True:
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            return None
+        try:
+            raw = await asyncio.wait_for(notification_queue.get(), timeout=remaining)
+        except TimeoutError:
+            return None
+        frame = parse_frame(raw)
+        if frame is None or frame.command != command:
+            continue
+        if predicate is not None and not predicate(frame):
+            continue
+        return frame
 
 
 async def _wait_for_training_list_response(

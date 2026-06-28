@@ -324,6 +324,31 @@ Confirmed on FireBoltt 148:
 - The watch face visibly changed on the device.
 - Sending slot `6` also worked and restored the previous active slot.
 
+## Watch-Face State Command
+
+The `watch-faces` command queries the read-only watch-face state and stores a
+structured `watch_faces` block in the JSON capture:
+
+```bash
+dafit-open watch-faces D3:05:F5:F9:B3:E5 --timeout 45 --retries 1 \
+  --wait-timeout 4 --json-out ble-logs/fireboltt148-watch-faces.json
+```
+
+Live FireBoltt 148 result:
+
+- Device version: `1`
+- Current display slot: `4`
+- Installed slots:
+  - index `0`, type `A`, id `1`
+  - index `1`, type `B`, id `3299`
+  - index `2`, type `B`, id `3300`
+  - index `3`, type `B`, id `3301`
+  - index `4`, type `B`, id `3302`
+  - index `5`, type `B`, id `3298`
+  - index `6`, type `B`, id `3297`
+- Support response: display index `65535`, supported values `[64]`
+- `0xB4 14` screen-info query still produced no response within four seconds.
+
 Further notes:
 
 - Health/data sync packet map: `docs/protocol/health-sync.md`

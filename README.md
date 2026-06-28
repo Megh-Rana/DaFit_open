@@ -48,6 +48,7 @@ dafit-open device-info AA:BB:CC:DD:EE:FF
 Run extra watch-face queries:
 
 ```bash
+dafit-open watch-faces AA:BB:CC:DD:EE:FF --json-out ble-logs/watch-faces.json
 dafit-open probe AA:BB:CC:DD:EE:FF --query-set watchface
 dafit-open probe AA:BB:CC:DD:EE:FF --query-set watchface-support
 ```
@@ -96,6 +97,18 @@ Browse captured workout data in a read-only terminal UI:
 
 ```bash
 dafit-open tui ble-logs
+```
+
+Export captured watch-face state:
+
+```bash
+dafit-open export-watch-faces ble-logs --output exports/watch-faces.json
+```
+
+Export one app-ready state document:
+
+```bash
+dafit-open export-state ble-logs --output exports/app-state.json
 ```
 
 For Linux/BlueZ connection timeouts, keep the watch awake/nearby and try:

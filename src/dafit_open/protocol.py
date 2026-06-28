@@ -67,6 +67,45 @@ class WatchFaceSlot:
     kind: str
     watch_face_id: int
 
+    def to_dict(self) -> dict[str, int | str]:
+        return {
+            "index": self.index,
+            "kind": self.kind,
+            "watch_face_id": self.watch_face_id,
+        }
+
+
+@dataclass(frozen=True)
+class WatchFaceSupport:
+    display_index: int
+    supported: list[int]
+
+    def to_dict(self) -> dict[str, int | list[int]]:
+        return {
+            "display_index": self.display_index,
+            "supported": self.supported,
+        }
+
+
+@dataclass(frozen=True)
+class WatchFaceScreen:
+    width: int
+    height: int
+    corner: int
+    thumb_width: int
+    thumb_height: int
+    thumb_corner: int
+
+    def to_dict(self) -> dict[str, int]:
+        return {
+            "width": self.width,
+            "height": self.height,
+            "corner": self.corner,
+            "thumb_width": self.thumb_width,
+            "thumb_height": self.thumb_height,
+            "thumb_corner": self.thumb_corner,
+        }
+
 
 def build_packet(command: int, payload: bytes = b"", mtu_payload: int = 20) -> bytes:
     """Build the common CRP command frame.
@@ -387,12 +426,13 @@ def _format_timestamp(timestamp: int) -> str:
 
 
 def decode_support_watch_faces(payload: bytes) -> str | None:
-    payload = bytes(payload)
-    if len(payload) < 2:
+    support = parse_support_watch_faces(payload)
+    if support is None:
         return None
-    display_index = (payload[0] << 8) + payload[1]
-    supported = list(payload[2:])
-    return f"support_watch_faces=display_index={display_index} supported={supported}"
+    return (
+        f"support_watch_faces=display_index={support.display_index} "
+        f"supported={support.supported}"
+    )
 
 
 def decode_watch_face_subcommand(payload: bytes) -> str | None:
@@ -401,19 +441,13 @@ def decode_watch_face_subcommand(payload: bytes) -> str | None:
         return None
     subcommand = payload[0]
     data = payload[1:]
-    if subcommand == 20 and len(data) >= 12:
-        values = [
-            data[0] + (data[1] << 8),
-            data[2] + (data[3] << 8),
-            data[4] + (data[5] << 8),
-            data[6] + (data[7] << 8),
-            data[8] + (data[9] << 8),
-            data[10] + (data[11] << 8),
-        ]
+    screen = parse_watch_face_screen(payload)
+    if screen is not None:
         return (
             "watch_face_screen="
-            f"width={values[0]} height={values[1]} corner={values[2]} "
-            f"thumb_width={values[3]} thumb_height={values[4]} thumb_corner={values[5]}"
+            f"width={screen.width} height={screen.height} corner={screen.corner} "
+            f"thumb_width={screen.thumb_width} thumb_height={screen.thumb_height} "
+            f"thumb_corner={screen.thumb_corner}"
         )
     if subcommand == 0 and len(data) >= 2:
         display_index = (data[0] << 8) + data[1]
@@ -423,6 +457,48 @@ def decode_watch_face_subcommand(payload: bytes) -> str | None:
 
 
 def decode_watch_face_list(payload: bytes) -> list[WatchFaceSlot] | None:
+    return parse_watch_face_list(payload)
+
+
+def parse_display_watch_face(payload: bytes) -> int | None:
+    payload = bytes(payload)
+    if not payload:
+        return None
+    return payload[0]
+
+
+def parse_support_watch_faces(payload: bytes) -> WatchFaceSupport | None:
+    payload = bytes(payload)
+    if len(payload) < 2:
+        return None
+    display_index = (payload[0] << 8) + payload[1]
+    return WatchFaceSupport(display_index=display_index, supported=list(payload[2:]))
+
+
+def parse_watch_face_screen(payload: bytes) -> WatchFaceScreen | None:
+    payload = bytes(payload)
+    if len(payload) < 13 or payload[0] != 20:
+        return None
+    data = payload[1:]
+    values = [
+        data[0] + (data[1] << 8),
+        data[2] + (data[3] << 8),
+        data[4] + (data[5] << 8),
+        data[6] + (data[7] << 8),
+        data[8] + (data[9] << 8),
+        data[10] + (data[11] << 8),
+    ]
+    return WatchFaceScreen(
+        width=values[0],
+        height=values[1],
+        corner=values[2],
+        thumb_width=values[3],
+        thumb_height=values[4],
+        thumb_corner=values[5],
+    )
+
+
+def parse_watch_face_list(payload: bytes) -> list[WatchFaceSlot] | None:
     payload = bytes(payload)
     if len(payload) < 2 or payload[0] != 0x01:
         return None
