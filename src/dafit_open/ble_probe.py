@@ -39,7 +39,7 @@ NOTIFY_UUIDS = {
 }
 
 
-async def scan(timeout: float = 10.0) -> None:
+async def scan(timeout: float = 10.0, verbose: bool = False) -> None:
     devices = await BleakScanner.discover(timeout=timeout, return_adv=True)
     for device, adv in devices.values():
         name = device.name or adv.local_name or "<unknown>"
@@ -47,6 +47,17 @@ async def scan(timeout: float = 10.0) -> None:
         print(f"{device.address}  RSSI={adv.rssi:>4}  {name}")
         if uuids:
             print(f"  services: {uuids}")
+        if verbose:
+            if adv.tx_power is not None:
+                print(f"  tx_power: {adv.tx_power}")
+            if adv.manufacturer_data:
+                for company, value in adv.manufacturer_data.items():
+                    print(f"  manufacturer[{company:#06x}]: {hex_bytes(value)}")
+            if adv.service_data:
+                for uuid, value in adv.service_data.items():
+                    print(f"  service_data[{uuid}]: {hex_bytes(value)}")
+            if adv.platform_data:
+                print(f"  platform_data: {adv.platform_data!r}")
 
 
 async def probe(
@@ -54,17 +65,25 @@ async def probe(
     timeout: float = 45.0,
     scan_timeout: float = 10.0,
     retries: int = 3,
+    pair: bool = False,
+    direct: bool = False,
 ) -> None:
-    device = await _find_device(address, scan_timeout)
-    if device is None:
-        print(f"device not found during {scan_timeout:.1f}s scan: {address}")
-        return
+    device: BLEDevice | str
+    if direct:
+        print(f"using direct address connection for {address}")
+        device = address
+    else:
+        found_device = await _find_device(address, scan_timeout)
+        if found_device is None:
+            print(f"device not found during {scan_timeout:.1f}s scan: {address}")
+            return
+        device = found_device
 
     last_error: BaseException | None = None
     for attempt in range(1, retries + 1):
         try:
-            print(f"connecting to {device.address} ({device.name or '<unknown>'}), attempt {attempt}/{retries}")
-            await _probe_device(device, timeout)
+            print(f"connecting to {_device_label(device)}, attempt {attempt}/{retries}")
+            await _probe_device(device, timeout, pair=pair)
             return
         except TimeoutError as exc:
             last_error = exc
@@ -75,17 +94,18 @@ async def probe(
 
         if attempt < retries:
             await asyncio.sleep(2)
-            refreshed = await _find_device(address, scan_timeout)
-            if refreshed is not None:
-                device = refreshed
+            if not direct:
+                refreshed = await _find_device(address, scan_timeout)
+                if refreshed is not None:
+                    device = refreshed
 
     print("probe failed after all retries")
     if last_error is not None:
         print(f"last error: {type(last_error).__name__}: {last_error}")
 
 
-async def _probe_device(device: BLEDevice, timeout: float) -> None:
-    async with BleakClient(device, timeout=timeout) as client:
+async def _probe_device(device: BLEDevice | str, timeout: float, pair: bool) -> None:
+    async with BleakClient(device, timeout=timeout, pair=pair) as client:
         print(f"connected: {client.is_connected}")
 
         services = client.services
@@ -135,6 +155,12 @@ async def _find_device(address: str, timeout: float) -> BLEDevice | None:
             print(f"found {device.address} RSSI={adv.rssi} name={name}")
             return device
     return None
+
+
+def _device_label(device: BLEDevice | str) -> str:
+    if isinstance(device, str):
+        return device
+    return f"{device.address} ({device.name or '<unknown>'})"
 
 
 def _notification_handler(sender: object, data: bytearray) -> None:

@@ -45,6 +45,15 @@ For Linux/BlueZ connection timeouts, keep the watch awake/nearby and try:
 dafit-open probe AA:BB:CC:DD:EE:FF --timeout 60 --scan-timeout 15 --retries 5
 ```
 
+Useful diagnostics/workarounds:
+
+```bash
+dafit-open scan --timeout 15 --verbose
+dafit-open probe AA:BB:CC:DD:EE:FF --timeout 60 --scan-timeout 15 --retries 3 --pair
+dafit-open probe AA:BB:CC:DD:EE:FF --timeout 60 --retries 3 --direct
+bluetoothctl remove AA:BB:CC:DD:EE:FF
+```
+
 The probe currently enumerates services, enables likely notification
 characteristics, and sends a couple of read-only query packets.
 
