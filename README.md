@@ -83,6 +83,14 @@ dafit-open training-series AA:BB:CC:DD:EE:FF 11 --kind heart-rate --json-out ble
 dafit-open set-watch-face AA:BB:CC:DD:EE:FF 5 --confirm --json-out ble-logs/set-watch-face-5.json
 ```
 
+Export captured workout data:
+
+```bash
+dafit-open export-captures ble-logs --format json --output exports/workouts.json
+dafit-open export-captures ble-logs --format csv --output exports/workouts.csv
+dafit-open export-captures ble-logs --no-samples
+```
+
 For Linux/BlueZ connection timeouts, keep the watch awake/nearby and try:
 
 ```bash
@@ -110,6 +118,14 @@ info AA:BB:CC:DD:EE:FF
 The probe currently enumerates services, enables likely notification
 characteristics, sends read-only query packets, and can save decoded packet
 captures for later analysis.
+
+## Interface Plan
+
+- CLI remains the primary testing and automation interface.
+- A future TUI should call the same capture/export and BLE functions instead of
+  reimplementing protocol parsing.
+- A future Android app should sit on top of the same clean-room protocol model
+  once data collection, watch-face transfer, and sync flows are stable.
 
 ## Repo Layout
 

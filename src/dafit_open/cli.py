@@ -6,6 +6,7 @@ import argparse
 import asyncio
 
 from .ble_probe import device_info, probe, scan, set_watch_face, training_detail, training_series
+from .capture_export import load_workout_summaries, write_workout_export
 
 
 def main() -> None:
@@ -104,6 +105,23 @@ def main() -> None:
     training_series_parser.add_argument("--direct", action="store_true")
     training_series_parser.add_argument("--json-out", help="write a structured JSON capture")
 
+    export_parser = subparsers.add_parser(
+        "export-captures",
+        help="export structured summaries from JSON captures",
+    )
+    export_parser.add_argument(
+        "paths",
+        nargs="*",
+        help="capture files or directories; defaults to ble-logs/",
+    )
+    export_parser.add_argument("--format", choices=["json", "csv"], default="json")
+    export_parser.add_argument("--output", help="write export to a file instead of stdout")
+    export_parser.add_argument(
+        "--no-samples",
+        action="store_true",
+        help="omit sample arrays from JSON output",
+    )
+
     args = parser.parse_args()
     if args.command == "scan":
         asyncio.run(scan(args.timeout, args.verbose))
@@ -175,6 +193,14 @@ def main() -> None:
                 direct=args.direct,
                 json_out=args.json_out,
             )
+        )
+    elif args.command == "export-captures":
+        workouts = load_workout_summaries(args.paths)
+        write_workout_export(
+            workouts,
+            args.format,
+            output=args.output,
+            include_samples=not args.no_samples,
         )
 
 
