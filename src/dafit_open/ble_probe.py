@@ -23,8 +23,9 @@ from .protocol import (
     QUERY_DEVICE_VERSION,
     QUERY_DISPLAY_WATCH_FACE,
     QUERY_WATCH_FACE_LIST,
+    decode_frame,
     hex_bytes,
-    parse_frame_prefix,
+    parse_frame,
 )
 
 
@@ -167,11 +168,13 @@ def _device_label(device: BLEDevice | str) -> str:
 
 def _notification_handler(sender: object, data: bytearray) -> None:
     raw = bytes(data)
-    parsed = parse_frame_prefix(raw)
+    frame = parse_frame(raw)
     suffix = ""
-    if parsed is not None:
-        flags, packet_len, command = parsed
-        suffix = f"  frame flags=0x{flags:02X} len={packet_len} cmd=0x{command:02X}"
+    if frame is not None:
+        suffix = f"  frame flags=0x{frame.flags:02X} len={frame.packet_len} cmd=0x{frame.command:02X}"
+        decoded = decode_frame(frame)
+        if decoded:
+            suffix += f"  {decoded}"
     print(f"<< {sender}: {hex_bytes(raw)}{suffix}")
 
 
@@ -207,7 +210,6 @@ def _can_write(properties: Iterable[str]) -> bool:
 
 
 def _guess_mtu_payload(client: BleakClient) -> int:
-    mtu = getattr(client, "mtu_size", None)
-    if isinstance(mtu, int) and mtu > 23:
-        return max(20, mtu - 3)
+    # BlueZ warns when reading BleakClient.mtu_size before explicitly acquiring
+    # MTU. Stay in the default 20-byte payload mode until we need large writes.
     return 20

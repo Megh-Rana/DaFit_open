@@ -52,6 +52,21 @@ class Packet:
         return build_packet(self.command, self.payload, self.mtu_payload)
 
 
+@dataclass(frozen=True)
+class Frame:
+    flags: int
+    packet_len: int
+    command: int
+    payload: bytes
+
+
+@dataclass(frozen=True)
+class WatchFaceSlot:
+    index: int
+    kind: str
+    watch_face_id: int
+
+
 def build_packet(command: int, payload: bytes = b"", mtu_payload: int = 20) -> bytes:
     """Build the common CRP command frame.
 
@@ -94,6 +109,52 @@ def parse_frame_prefix(data: bytes) -> tuple[int, int, int] | None:
     if flags >= 0x20:
         packet_len |= (flags - 0x20) << 8
     return flags, packet_len, data[4]
+
+
+def parse_frame(data: bytes) -> Frame | None:
+    parsed = parse_frame_prefix(data)
+    if parsed is None:
+        return None
+    flags, packet_len, command = parsed
+    return Frame(flags=flags, packet_len=packet_len, command=command, payload=bytes(data[5:]))
+
+
+def decode_frame(frame: Frame) -> str | None:
+    if frame.command == 0x2E and frame.payload:
+        return f"device_version={frame.payload[0]}"
+    if frame.command == 0xA6:
+        slots = decode_watch_face_list(frame.payload)
+        if slots is None:
+            return None
+        return "watch_faces=[" + ", ".join(
+            f"index={slot.index} type={slot.kind} id={slot.watch_face_id}"
+            for slot in slots
+        ) + "]"
+    return None
+
+
+def decode_watch_face_list(payload: bytes) -> list[WatchFaceSlot] | None:
+    payload = bytes(payload)
+    if len(payload) < 2 or payload[0] != 0x01:
+        return None
+    count = payload[1]
+    slots: list[WatchFaceSlot] = []
+    for offset in range(2, len(payload), 4):
+        if offset + 4 > len(payload):
+            break
+        kind_byte = payload[offset + 1]
+        kind = chr(kind_byte) if 32 <= kind_byte <= 126 else f"0x{kind_byte:02X}"
+        watch_face_id = (payload[offset + 2] << 8) + payload[offset + 3]
+        slots.append(
+            WatchFaceSlot(
+                index=payload[offset],
+                kind=kind,
+                watch_face_id=watch_face_id,
+            )
+        )
+    if len(slots) != count:
+        return slots
+    return slots
 
 
 def hex_bytes(data: bytes) -> str:

@@ -209,3 +209,46 @@ Resolved `feea` service shape on FireBoltt 148:
 
 This differs slightly from the broad decompiled-app service mapper, which also
 knows about optional `fee7`, `fee8`, and `fee9` characteristics under `feea`.
+
+## First Probe Responses
+
+Successful `dafit-open probe D3:05:F5:F9:B3:E5 --timeout 30 --retries 1`
+observations:
+
+- Notifications enabled on `2a37`, `2a19`, `fee3`, and `fee1`.
+- Writes to `fee2` succeeded.
+- `0x2E` query sent: `FE EA 10 05 2E`
+- `0x2E` response on `fee3`: `FE EA 20 06 2E 01`
+- Parsed device version payload: `1`
+- `fee1` also emitted non-framed bytes: `22 01 00 F0 00 00 10 00 00`
+- `0xB4 00` display-watch-face query sent, no response observed in this run.
+- `0xA6 01` watch-face-list query sent: `FE EA 10 06 A6 01`
+- `0xA6` response on `fee3`:
+
+  ```text
+  FE EA 20 23 A6
+  01 07
+  00 41 00 01
+  01 42 0C E3
+  02 42 0C E4
+  03 42 0C E5
+  04 42 0C E6
+  05 42 0C E2
+  06 42 0C E1
+  ```
+
+The decompiled parser `ca.n0.m(byte[])` interprets the `0xA6` payload as:
+
+- Byte 0: subcommand/status, expected `1`
+- Byte 1: count
+- Then repeated 4-byte slots: index, one-byte ASCII type, big-endian watch-face ID
+
+Parsed slots:
+
+- index `0`, type `A`, id `1`
+- index `1`, type `B`, id `3299`
+- index `2`, type `B`, id `3300`
+- index `3`, type `B`, id `3301`
+- index `4`, type `B`, id `3302`
+- index `5`, type `B`, id `3298`
+- index `6`, type `B`, id `3297`
