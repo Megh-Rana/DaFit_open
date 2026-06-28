@@ -75,6 +75,21 @@ Observed from a local `dafit-open scan --verbose` run:
 - BlueZ cache state during scan: unpaired, unbonded, untrusted, unconnected,
   services unresolved
 
+The watch also appears to have a separate "phone and media" mode for classic
+Bluetooth audio/calls. That mode is distinct from the BLE `feea` companion-app
+interface. Enabling phone/media may expose speaker/headset profiles, but it is
+not expected to be required for app-style BLE data, settings, health sync, or
+watch-face transfer.
+
+In `bluetoothctl`, a previously discovered BLE device may appear as `[CHG]`
+instead of `[NEW]`. For example, seeing:
+
+```text
+[CHG] Device D3:05:F5:F9:B3:E5 RSSI: ...
+```
+
+still means BlueZ is receiving advertisements for that BLE address.
+
 Nearby related device:
 
 - `DF:60:6F:58:E5:F6`, `FireBoltt 146`
