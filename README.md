@@ -54,6 +54,15 @@ dafit-open probe AA:BB:CC:DD:EE:FF --timeout 60 --retries 3 --direct
 bluetoothctl remove AA:BB:CC:DD:EE:FF
 ```
 
+If Bleak still times out, compare with BlueZ directly:
+
+```bash
+bluetoothctl
+scan on
+connect AA:BB:CC:DD:EE:FF
+info AA:BB:CC:DD:EE:FF
+```
+
 The probe currently enumerates services, enables likely notification
 characteristics, and sends a couple of read-only query packets.
 

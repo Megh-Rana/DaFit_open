@@ -60,6 +60,27 @@ Other observed standard/auxiliary services:
 - Heart rate: `180d`, characteristic `2a37`
 - Auxiliary service: `3802`, characteristic `4a02`
 
+## FireBoltt 148 Advertisement
+
+Observed from a local `dafit-open scan --verbose` run:
+
+- Address: `D3:05:F5:F9:B3:E5`
+- Address type: public
+- Name: `FireBoltt 148`
+- Advertised service UUID: `0000feea-0000-1000-8000-00805f9b34fb`
+- Manufacturer data company/id: `0xf0ef`
+- Manufacturer data payload: `D3 05 F5 F9 B3 E5`
+- Service data for `feea`: `45 45 53 03 04 00 10`
+- Advertising flags: `02`
+- BlueZ cache state during scan: unpaired, unbonded, untrusted, unconnected,
+  services unresolved
+
+Nearby related device:
+
+- `DF:60:6F:58:E5:F6`, `FireBoltt 146`
+- Same `feea` service and manufacturer id `0xf0ef`
+- Service data for `feea`: `45 59 4E 03 04 00 10`
+
 ## Common Packet Frame
 
 Most command packets use this frame:
@@ -95,3 +116,37 @@ Capture:
 
 Add the captured bytes to a separate local log first. Only promote stable,
 non-private protocol facts into these docs.
+
+## BlueZ Connection Timeout Notes
+
+If scanning sees the watch but GATT connection times out before services are
+resolved:
+
+1. Turn off Bluetooth on the phone or force-close Da Fit so the watch is not
+   already connected to another central.
+2. Clear stale BlueZ state:
+
+   ```bash
+   bluetoothctl remove D3:05:F5:F9:B3:E5
+   ```
+
+3. Try pairing mode:
+
+   ```bash
+   dafit-open probe D3:05:F5:F9:B3:E5 --timeout 60 --scan-timeout 15 --retries 3 --pair
+   ```
+
+4. Try direct raw-address mode:
+
+   ```bash
+   dafit-open probe D3:05:F5:F9:B3:E5 --timeout 60 --retries 3 --direct
+   ```
+
+5. Compare with BlueZ directly:
+
+   ```bash
+   bluetoothctl
+   scan on
+   connect D3:05:F5:F9:B3:E5
+   info D3:05:F5:F9:B3:E5
+   ```
