@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +47,52 @@ class PixelImage:
                 source_x = crop_x + min(crop_width - 1, (x * crop_width) // width)
                 output.append(self.pixels[row_offset + source_x])
         return PixelImage(width=width, height=height, pixels=output)
+
+    def resized_contain(
+        self,
+        width: int,
+        height: int,
+        background: tuple[int, int, int] = (0, 0, 0),
+    ) -> "PixelImage":
+        if width <= 0 or height <= 0:
+            raise ValueError("target image size must be positive")
+        scale = min(width / self.width, height / self.height)
+        scaled_width = max(1, min(width, round(self.width * scale)))
+        scaled_height = max(1, min(height, round(self.height * scale)))
+        scaled = self.resized_stretch(scaled_width, scaled_height)
+        output = [background] * (width * height)
+        start_x = (width - scaled_width) // 2
+        start_y = (height - scaled_height) // 2
+        for y in range(scaled_height):
+            dest_offset = (start_y + y) * width + start_x
+            source_offset = y * scaled_width
+            output[dest_offset : dest_offset + scaled_width] = scaled.pixels[
+                source_offset : source_offset + scaled_width
+            ]
+        return PixelImage(width=width, height=height, pixels=output)
+
+    def resized_stretch(self, width: int, height: int) -> "PixelImage":
+        if width <= 0 or height <= 0:
+            raise ValueError("target image size must be positive")
+        output: list[tuple[int, int, int]] = []
+        for y in range(height):
+            source_y = min(self.height - 1, (y * self.height) // height)
+            row_offset = source_y * self.width
+            for x in range(width):
+                source_x = min(self.width - 1, (x * self.width) // width)
+                output.append(self.pixels[row_offset + source_x])
+        return PixelImage(width=width, height=height, pixels=output)
+
+    def circular_mask(self, background: tuple[int, int, int] = (0, 0, 0)) -> "PixelImage":
+        radius = min(self.width, self.height) / 2
+        center_x = (self.width - 1) / 2
+        center_y = (self.height - 1) / 2
+        output = []
+        for y in range(self.height):
+            for x in range(self.width):
+                distance = math.hypot(x - center_x, y - center_y)
+                output.append(self.pixels[y * self.width + x] if distance <= radius else background)
+        return PixelImage(width=self.width, height=self.height, pixels=output)
 
     def to_rgb565(self, byteorder: str = "little") -> bytes:
         if byteorder not in {"little", "big"}:
@@ -100,6 +147,10 @@ class OriginalBackgroundPlan:
     height: int
     packet_length: int
     payload_size: int
+    chunk_count: int
+    last_chunk_size: int
+    wrapped_transfer_size: int
+    wrapper_overhead_size: int
     payload_sha256: str
     payload_crc16: int
     size_packet: Packet
@@ -113,6 +164,10 @@ class OriginalBackgroundPlan:
             "height": self.height,
             "packet_length": self.packet_length,
             "payload_size": self.payload_size,
+            "chunk_count": self.chunk_count,
+            "last_chunk_size": self.last_chunk_size,
+            "wrapped_transfer_size": self.wrapped_transfer_size,
+            "wrapper_overhead_size": self.wrapper_overhead_size,
             "payload_sha256": self.payload_sha256,
             "payload_crc16": f"0x{self.payload_crc16:04X}",
             "packets": {
@@ -131,10 +186,11 @@ def build_watch_face_package(
     thumb_width: int = 80,
     thumb_height: int = 80,
     byteorder: str = "little",
+    fit: str = "cover",
 ) -> dict[str, Any]:
     source = load_image(image_path)
-    face = source.resized_cover(width, height)
-    thumb = source.resized_cover(thumb_width, thumb_height)
+    face = transform_image(source, width, height, fit)
+    thumb = transform_image(source, thumb_width, thumb_height, fit)
 
     output = Path(out_dir)
     output.mkdir(parents=True, exist_ok=True)
@@ -150,6 +206,7 @@ def build_watch_face_package(
         "source": str(image_path),
         "format": "raw-rgb565",
         "byteorder": byteorder,
+        "fit": fit,
         "width": width,
         "height": height,
         "thumb_width": thumb_width,
@@ -174,9 +231,13 @@ def build_original_background_package(
     out_dir: str | Path,
     width: int = 466,
     height: int = 466,
+    fit: str = "cover",
+    circular_mask: bool = False,
 ) -> dict[str, Any]:
     source = load_image(image_path)
-    face = source.resized_cover(width, height)
+    face = transform_image(source, width, height, fit)
+    if circular_mask:
+        face = face.circular_mask()
 
     output = Path(out_dir)
     output.mkdir(parents=True, exist_ok=True)
@@ -190,8 +251,12 @@ def build_original_background_package(
         "source": str(image_path),
         "format": "original-rgb565-background",
         "byteorder": "big",
+        "fit": fit,
+        "circular_mask": circular_mask,
         "width": width,
         "height": height,
+        "pixel_count": width * height,
+        "payload_size": width * height * 2,
         "files": [
             _file_record(payload_path, "background"),
             _file_record(preview_path, "preview"),
@@ -199,6 +264,7 @@ def build_original_background_package(
         "notes": [
             "Matches the CRPWatchFaceLayoutInfo.CompressionType.ORIGINAL background path.",
             "The app encodes ORIGINAL background pixels as big-endian RGB565 before chunk wrapping.",
+            "Circular masking affects corner pixels only; it does not reduce raw RGB565 payload size.",
         ],
     }
     manifest_path = output / "manifest.json"
@@ -222,6 +288,16 @@ def load_image(path: str | Path) -> PixelImage:
         rgb = image.convert("RGB")
         pixels = [(red, green, blue) for red, green, blue in rgb.getdata()]
         return PixelImage(width=rgb.width, height=rgb.height, pixels=pixels)
+
+
+def transform_image(source: PixelImage, width: int, height: int, fit: str) -> PixelImage:
+    if fit == "cover":
+        return source.resized_cover(width, height)
+    if fit == "contain":
+        return source.resized_contain(width, height)
+    if fit == "stretch":
+        return source.resized_stretch(width, height)
+    raise ValueError("fit must be one of: cover, contain, stretch")
 
 
 def load_package_manifest(package_dir: str | Path) -> dict[str, Any]:
@@ -290,6 +366,9 @@ def plan_original_background_transfer(
         raise ValueError(f"not an original background package: {package_path}")
     payload_path = package_path / "background.rgb565"
     payload = payload_path.read_bytes()
+    chunk_count = _chunk_count(len(payload), packet_length)
+    last_chunk_size = len(payload) - ((chunk_count - 1) * packet_length) if chunk_count else 0
+    wrapper_overhead = _wrapped_chunk_overhead(packet_length)
     chunks = []
     for offset in _chunk_offsets(len(payload), packet_length, chunk_preview_count):
         chunk_data = payload[offset : offset + packet_length]
@@ -306,6 +385,10 @@ def plan_original_background_transfer(
         height=int(manifest["height"]),
         packet_length=packet_length,
         payload_size=len(payload),
+        chunk_count=chunk_count,
+        last_chunk_size=last_chunk_size,
+        wrapped_transfer_size=len(payload) + (chunk_count * wrapper_overhead),
+        wrapper_overhead_size=chunk_count * wrapper_overhead,
         payload_sha256=hashlib.sha256(payload).hexdigest(),
         payload_crc16=crp_crc16(payload),
         size_packet=watch_face_background_size_packet(len(payload)),
@@ -442,6 +525,12 @@ def _chunk_count(file_size: int, packet_length: int) -> int:
     if packet_length <= 0:
         raise ValueError(f"packet length out of range: {packet_length}")
     return (file_size + packet_length - 1) // packet_length
+
+
+def _wrapped_chunk_overhead(packet_length: int) -> int:
+    if packet_length <= 0:
+        raise ValueError(f"packet length out of range: {packet_length}")
+    return 5 if packet_length == 64 else 4
 
 
 def _packet_dict(packet: Packet) -> dict[str, Any]:

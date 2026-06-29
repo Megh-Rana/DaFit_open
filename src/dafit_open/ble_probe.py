@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Iterable
 from datetime import UTC, datetime
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -678,6 +679,8 @@ async def upload_original_background(
     retries: int = 1,
     pair: bool = False,
     direct: bool = False,
+    compact_capture: bool = False,
+    progress_every: int = 25,
     json_out: str | None = None,
 ) -> None:
     plan = plan_original_background_transfer(
@@ -704,6 +707,8 @@ async def upload_original_background(
             "retries": retries,
             "pair": pair,
             "direct": direct,
+            "compact_capture": compact_capture,
+            "progress_every": progress_every,
         },
     )
     capture["original_background_plan"] = plan.to_dict()
@@ -734,6 +739,8 @@ async def upload_original_background(
                 wait_timeout,
                 timeout,
                 pair=pair,
+                compact_capture=compact_capture,
+                progress_every=progress_every,
                 capture=capture,
             )
             _write_capture(json_out, capture)
@@ -1675,6 +1682,8 @@ async def _upload_original_background_device(
     wait_timeout: float,
     timeout: float,
     pair: bool,
+    compact_capture: bool,
+    progress_every: int,
     capture: dict[str, Any],
 ) -> None:
     package_path = Path(package_dir)
@@ -1772,8 +1781,11 @@ async def _upload_original_background_device(
                     pending_notifications,
                 )
                 if negotiated is None:
-                    negotiated = 64
-                    print(f"no package-length response within {wait_timeout:.1f}s; falling back to {negotiated}")
+                    negotiated = _original_background_fallback_packet_length(gatt_payload)
+                    print(
+                        f"no package-length response within {wait_timeout:.1f}s; "
+                        f"falling back to {negotiated} from MTU payload {gatt_payload}"
+                    )
                 else:
                     print(f"negotiated file packet length: {negotiated}")
                 plan = plan_original_background_transfer(
@@ -1796,6 +1808,8 @@ async def _upload_original_background_device(
                 wait_timeout,
                 complete,
                 max_chunks,
+                compact_capture,
+                progress_every,
                 notification_queue,
                 pending_notifications,
                 capture,
@@ -2526,6 +2540,10 @@ def _handle_notification(
         }
         if decoded:
             suffix += f"  {decoded}"
+        if _compact_transfer_capture(capture) and frame.command in {0x6E, 0x74, 0xB7}:
+            _record_compact_notification(capture, frame, decoded)
+            if _is_repetitive_transfer_decode(decoded):
+                return
     if capture is not None:
         capture["notifications"].append(record)
     print(f"<< {sender}: {hex_bytes(raw)}{suffix}")
@@ -2720,12 +2738,16 @@ async def _transfer_original_background(
     wait_timeout: float,
     complete: bool,
     max_chunks: int,
+    compact_capture: bool,
+    progress_every: int,
     notification_queue: asyncio.Queue[bytes],
     pending_notifications: list[bytes],
     capture: dict[str, Any],
     upload_record: dict[str, Any],
 ) -> bool:
     chunks_sent = 0
+    if progress_every <= 0:
+        progress_every = 25
     while True:
         event = await _wait_for_original_background_event(
             notification_queue,
@@ -2763,9 +2785,28 @@ async def _transfer_original_background(
                 return False
             chunk = file_data[offset : offset + packet_length]
             frame = wrap_transfer_chunk(chunk, packet_length)
-            print(
-                f"sending original background chunk offset={offset} data_len={len(chunk)} "
-                f"crc=0x{crp_crc16(chunk):04X}"
+            if len(frame) > gatt_payload:
+                print(
+                    f"cannot send original background frame of {len(frame)} bytes "
+                    f"with negotiated payload {gatt_payload}; stopping"
+                )
+                upload_record["error"] = "chunk_frame_exceeds_mtu_payload"
+                await _send_original_background_check(
+                    client,
+                    command_char,
+                    command_with_response,
+                    gatt_payload,
+                    capture,
+                    ok=False,
+                )
+                return False
+            _print_original_background_progress(
+                chunks_sent,
+                offset,
+                len(chunk),
+                len(file_data),
+                compact_capture,
+                progress_every,
             )
             await _write_raw_fragmented(
                 client,
@@ -2809,9 +2850,29 @@ async def _transfer_original_background(
                 return False
             chunk = file_data[offset : offset + packet_length]
             frame = wrap_transfer_chunk(chunk, packet_length)
-            print(
-                f"sending original background chunk index={index} offset={offset} "
-                f"data_len={len(chunk)} crc=0x{crp_crc16(chunk):04X}"
+            if len(frame) > gatt_payload:
+                print(
+                    f"cannot send original background frame of {len(frame)} bytes "
+                    f"with negotiated payload {gatt_payload}; stopping"
+                )
+                upload_record["error"] = "chunk_frame_exceeds_mtu_payload"
+                await _send_original_background_check(
+                    client,
+                    command_char,
+                    command_with_response,
+                    gatt_payload,
+                    capture,
+                    ok=False,
+                )
+                return False
+            _print_original_background_progress(
+                chunks_sent,
+                offset,
+                len(chunk),
+                len(file_data),
+                compact_capture,
+                progress_every,
+                index=index,
             )
             await _write_raw_fragmented(
                 client,
@@ -2864,6 +2925,83 @@ async def _send_transfer_abort(
         channel="command",
     )
     file_record["aborted"] = True
+
+
+def _original_background_fallback_packet_length(gatt_payload: int) -> int:
+    if gatt_payload <= 4:
+        return 1
+    return min(240, gatt_payload - 4)
+
+
+def _print_original_background_progress(
+    chunks_sent: int,
+    offset: int,
+    data_len: int,
+    total_size: int,
+    compact: bool,
+    progress_every: int,
+    index: int | None = None,
+) -> None:
+    if compact and chunks_sent % progress_every != 0:
+        return
+    percent = ((offset + data_len) / total_size) * 100 if total_size else 0.0
+    index_text = f" index={index}" if index is not None else ""
+    print(
+        f"sending original background chunk{index_text} offset={offset} "
+        f"data_len={data_len} progress={percent:.1f}%"
+    )
+
+
+def _compact_transfer_capture(capture: dict[str, Any] | None) -> bool:
+    if capture is None:
+        return False
+    options = capture.get("options")
+    return isinstance(options, dict) and bool(options.get("compact_capture"))
+
+
+def _is_transfer_channel(channel: str) -> bool:
+    return "transfer" in channel
+
+
+def _is_repetitive_transfer_decode(decoded: str) -> bool:
+    return (
+        decoded.startswith("watch_face_background_chunk_index ")
+        or decoded.startswith("watch_face_background_offset ")
+        or decoded.startswith("store_watch_face_offset ")
+        or decoded.startswith("file_transfer_offset ")
+    )
+
+
+def _record_compact_notification(
+    capture: dict[str, Any] | None,
+    frame: Any,
+    decoded: str,
+) -> None:
+    if capture is None:
+        return
+    compact = capture.setdefault(
+        "compact_notifications",
+        {
+            "transfer_count": 0,
+            "by_command": {},
+            "last_repetitive": None,
+            "terminal": [],
+        },
+    )
+    compact["transfer_count"] += 1
+    command_key = f"0x{frame.command:02X}"
+    by_command = compact.setdefault("by_command", {})
+    by_command[command_key] = int(by_command.get(command_key, 0)) + 1
+    record = {
+        "timestamp": _utc_now(),
+        "command": frame.command,
+        "payload_hex": hex_bytes(frame.payload),
+        "decoded": decoded,
+    }
+    if _is_repetitive_transfer_decode(decoded):
+        compact["last_repetitive"] = record
+    else:
+        compact.setdefault("terminal", []).append(record)
 
 
 async def _send_original_background_check(
@@ -3070,31 +3208,36 @@ async def _write_raw_fragmented(
         raise ValueError(
             f"{channel} write length {len(data)} exceeds GATT payload {gatt_payload}"
         )
+    compact = _compact_transfer_capture(capture) and _is_transfer_channel(channel)
     fragments = []
     for offset in range(0, len(data), gatt_payload):
         fragment = data[offset : offset + gatt_payload]
-        fragments.append(
-            {
-                "offset": offset,
-                "hex": hex_bytes(fragment),
-                "length": len(fragment),
-            }
-        )
+        fragment_record = {
+            "offset": offset,
+            "length": len(fragment),
+        }
+        if compact:
+            fragment_record["crc16"] = f"0x{crp_crc16(fragment):04X}"
+        else:
+            fragment_record["hex"] = hex_bytes(fragment)
+        fragments.append(fragment_record)
         await client.write_gatt_char(write_char, fragment, response=write_with_response)
         await asyncio.sleep(0.02)
-    capture.setdefault("sent_fragments", []).append(
-        {
-            "timestamp": _utc_now(),
-            "channel": channel,
-            "command": packet_command,
-            "total_length": len(data),
-            "gatt_payload": gatt_payload,
-            "fragment_count": len(fragments),
-            "write_characteristic": _char_snapshot(write_char),
-            "response": write_with_response,
-            "fragments": fragments,
-        }
-    )
+    record = {
+        "timestamp": _utc_now(),
+        "channel": channel,
+        "command": packet_command,
+        "total_length": len(data),
+        "gatt_payload": gatt_payload,
+        "fragment_count": len(fragments),
+        "write_characteristic": _char_snapshot(write_char),
+        "response": write_with_response,
+        "fragments": fragments,
+    }
+    if compact:
+        record["payload_crc16"] = f"0x{crp_crc16(data):04X}"
+        record["payload_sha256"] = hashlib.sha256(data).hexdigest()
+    capture.setdefault("sent_fragments", []).append(record)
 
 
 def _format_optional_crc(value: Any) -> str:

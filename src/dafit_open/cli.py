@@ -160,6 +160,12 @@ def main() -> None:
     build_face_parser.add_argument("--thumb-width", type=int, default=80)
     build_face_parser.add_argument("--thumb-height", type=int, default=80)
     build_face_parser.add_argument(
+        "--fit",
+        choices=["cover", "contain", "stretch"],
+        default="cover",
+        help="how to map the source image into the watch-face rectangle",
+    )
+    build_face_parser.add_argument(
         "--byteorder",
         choices=["little", "big"],
         default="little",
@@ -205,6 +211,17 @@ def main() -> None:
     original_bg_parser.add_argument("--out-dir", required=True, help="output package directory")
     original_bg_parser.add_argument("--width", type=int, default=466)
     original_bg_parser.add_argument("--height", type=int, default=466)
+    original_bg_parser.add_argument(
+        "--fit",
+        choices=["cover", "contain", "stretch"],
+        default="cover",
+        help="how to map the source image into the background rectangle",
+    )
+    original_bg_parser.add_argument(
+        "--circular-mask",
+        action="store_true",
+        help="black out pixels outside the circular screen preview",
+    )
 
     original_bg_plan_parser = subparsers.add_parser(
         "original-background-transfer-plan",
@@ -231,6 +248,17 @@ def main() -> None:
         "--packet-length",
         type=int,
         help="override negotiated file packet length",
+    )
+    upload_original_bg_parser.add_argument(
+        "--compact-capture",
+        action="store_true",
+        help="do not store every transfer chunk body in JSON captures",
+    )
+    upload_original_bg_parser.add_argument(
+        "--progress-every",
+        type=int,
+        default=25,
+        help="print one transfer progress line every N chunks in compact mode",
     )
     upload_original_bg_parser.add_argument("--max-chunks", type=int, default=0)
     upload_original_bg_parser.add_argument(
@@ -817,6 +845,7 @@ def main() -> None:
                 thumb_width=args.thumb_width,
                 thumb_height=args.thumb_height,
                 byteorder=args.byteorder,
+                fit=args.fit,
             )
         except (RuntimeError, ValueError, OSError) as exc:
             parser.error(str(exc))
@@ -852,6 +881,8 @@ def main() -> None:
                 args.out_dir,
                 width=args.width,
                 height=args.height,
+                fit=args.fit,
+                circular_mask=args.circular_mask,
             )
         except (ValueError, OSError, RuntimeError) as exc:
             parser.error(str(exc))
@@ -898,6 +929,8 @@ def main() -> None:
                 retries=args.retries,
                 pair=args.pair,
                 direct=args.direct,
+                compact_capture=args.compact_capture,
+                progress_every=args.progress_every,
                 json_out=args.json_out,
             )
         )

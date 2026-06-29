@@ -162,8 +162,9 @@ comes from the app's `CompressionType.ORIGINAL` custom-background flow and
 writes a single big-endian RGB565 `background.rgb565` payload:
 
 ```bash
-dafit-open build-original-background photo.png --out-dir original-background-package
-dafit-open original-background-transfer-plan original-background-package --packet-length 64
+dafit-open build-original-background photo.png --out-dir original-background-package \
+  --fit cover --circular-mask
+dafit-open original-background-transfer-plan original-background-package --packet-length 240
 dafit-open upload-original-background AA:BB:CC:DD:EE:FF original-background-package --dry-run
 ```
 
@@ -175,6 +176,15 @@ watch's transfer event shape, and stops before streaming image data:
 dafit-open upload-original-background AA:BB:CC:DD:EE:FF original-background-package \
   --confirm --experimental-original --max-chunks 0 \
   --json-out ble-logs/original-background-handshake.json
+```
+
+For supervised full ORIGINAL probes, use compact capture so the JSON does not
+store every transfer payload body:
+
+```bash
+dafit-open upload-original-background AA:BB:CC:DD:EE:FF original-background-package \
+  --confirm --experimental-original --complete --compact-capture \
+  --json-out ble-logs/original-background-compact.json
 ```
 
 Save structured captures under the ignored `ble-logs/` folder:

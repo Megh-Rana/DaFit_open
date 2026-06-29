@@ -216,6 +216,10 @@ class ProtocolDecodeTest(unittest.TestCase):
             decode_frame(parse_frame(bytes.fromhex("FE EA 20 0A 6E 02 00 00 76 3D"))),
             "watch_face_background_crc crc=0x763D payload=02 00 00 76 3D",
         )
+        self.assertEqual(
+            decode_frame(parse_frame(bytes.fromhex("FE EA 20 09 6E FF FF 00 00"))),
+            "watch_face_background_crc crc=0x0000 payload=FF FF 00 00",
+        )
 
     def test_builds_settings_packets(self) -> None:
         self.assertEqual(

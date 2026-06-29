@@ -270,7 +270,7 @@ Dry-run commands:
 
 ```bash
 dafit-open build-original-background photo.png --out-dir /tmp/dafit-original-bg
-dafit-open original-background-transfer-plan /tmp/dafit-original-bg --packet-length 64
+dafit-open original-background-transfer-plan /tmp/dafit-original-bg --packet-length 240
 dafit-open upload-original-background D3:05:F5:F9:B3:E5 /tmp/dafit-original-bg --dry-run
 ```
 
@@ -289,9 +289,34 @@ FireBoltt 148 live observations:
 - This is parsed as `watch_face_background_chunk_index index=0`.
 - Sending one wrapped 64-byte chunk produced the next request:
   `FE EA 20 07 6E 00 01`.
-- No `0xBA` packet-length response was observed, so the current uploader falls
-  back to the app-compatible 64-byte chunk wrapper.
+- No `0xBA` packet-length response was observed. The uploader now falls back to
+  the largest wrapped chunk that fits one negotiated GATT write. On FireBoltt
+  148 with MTU payload `244`, that is `240` data bytes:
+  `FE <crc16:be> <len:uint8> <240 bytes>`.
+- At 466 x 466 RGB565, the raw payload is fixed at `434312` bytes. The 240-byte
+  fallback gives `1810` expected chunks before check/status, compared with
+  `6787` chunks at the original 64-byte fallback.
 - Bounded probes then sent `0x6E FF FF FF FF` to fail/abort cleanly.
+- A full 64-byte fallback attempt reached chunk index `6294` and then returned
+  `FE EA 20 09 6E FF FF 00 00`, parsed as CRC/status `0x0000`; this is treated
+  as rejection, not success.
+- A full 240-byte fallback attempt reached chunk index `1779` and then returned
+  the same `FE EA 20 09 6E FF FF 00 00` rejection. This is earlier than the
+  expected final chunk index `1809`, so the remaining mismatch is likely the
+  app's cropped/compressed watch-face package format rather than only BLE chunk
+  size.
 
-Do not run `--complete` until we intentionally choose a real source image and
-are ready to let the watch apply a full custom background.
+The decompiled app photo crop helper uses cover-style scaling and switches to a
+circle crop style for round watch profiles. The CLI can mirror those prep steps:
+
+```bash
+dafit-open build-original-background photo.png --out-dir /tmp/dafit-original-bg \
+  --fit cover --circular-mask
+dafit-open upload-original-background D3:05:F5:F9:B3:E5 /tmp/dafit-original-bg \
+  --confirm --experimental-original --complete --compact-capture \
+  --json-out ble-logs/fireboltt148-original-background-compact.json
+```
+
+Run `--complete` only as a supervised probe with a reviewed package and capture
+path, because it streams enough data for the watch to attempt applying the
+custom background.

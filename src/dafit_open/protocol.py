@@ -480,6 +480,10 @@ def decode_file_transfer_frame(payload: bytes) -> str | None:
 
 def decode_watch_face_background_transfer(payload: bytes) -> str | None:
     payload = bytes(payload)
+    if payload == b"\x00\x00\x00\x00":
+        return "watch_face_background_check_ok"
+    if payload == b"\xFF\xFF\xFF\xFF":
+        return "watch_face_background_check_failed"
     index = parse_store_watch_face_offset(payload)
     if index is not None:
         return f"watch_face_background_chunk_index index={index}"
@@ -489,12 +493,11 @@ def decode_watch_face_background_transfer(payload: bytes) -> str | None:
     crc = parse_file_transfer_crc(payload)
     if crc is not None:
         return f"watch_face_background_crc crc=0x{crc:04X} payload={hex_bytes(payload)}"
+    crc = parse_store_watch_face_crc(payload)
+    if crc is not None:
+        return f"watch_face_background_crc crc=0x{crc:04X} payload={hex_bytes(payload)}"
     if len(payload) != 4:
         return f"watch_face_background_transfer payload={hex_bytes(payload)}"
-    if payload == b"\x00\x00\x00\x00":
-        return "watch_face_background_check_ok"
-    if payload == b"\xFF\xFF\xFF\xFF":
-        return "watch_face_background_check_failed"
     size = int.from_bytes(payload, byteorder="big", signed=False)
     return f"watch_face_background_size size={size}"
 

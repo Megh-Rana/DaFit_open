@@ -115,11 +115,51 @@ class WatchFaceImageTest(unittest.TestCase):
             self.assertEqual(manifest["schema"], "dafit-open.original-background-package.v1")
             self.assertEqual((package / "background.rgb565").read_bytes(), bytes.fromhex("F8 00 07 E0"))
             self.assertEqual(plan.payload_size, 4)
+            self.assertEqual(plan.chunk_count, 1)
+            self.assertEqual(plan.last_chunk_size, 4)
+            self.assertEqual(plan.wrapped_transfer_size, 8)
+            self.assertEqual(plan.wrapper_overhead_size, 4)
             self.assertEqual(
                 plan.size_packet.build(),
                 bytes.fromhex("FE EA 10 09 6E 00 00 00 04"),
             )
             self.assertEqual(plan.chunks[0]["frame_hex"], "FE 24 D0 04 F8 00 07 E0")
+
+    def test_original_background_fit_and_circular_mask_options(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            source = directory / "source.ppm"
+            source.write_bytes(
+                b"P6\n2 1\n255\n"
+                + bytes(
+                    [
+                        255,
+                        0,
+                        0,
+                        0,
+                        255,
+                        0,
+                    ]
+                )
+            )
+            package = directory / "original"
+
+            manifest = build_original_background_package(
+                source,
+                package,
+                width=4,
+                height=4,
+                fit="contain",
+                circular_mask=True,
+            )
+            payload = (package / "background.rgb565").read_bytes()
+
+            self.assertEqual(manifest["fit"], "contain")
+            self.assertTrue(manifest["circular_mask"])
+            self.assertEqual(manifest["payload_size"], 32)
+            self.assertEqual(len(payload), 32)
+            self.assertEqual(payload[:2], bytes.fromhex("00 00"))
+            self.assertNotEqual(payload[10:12], bytes.fromhex("00 00"))
 
     def test_wraps_transfer_chunks(self) -> None:
         data = bytes.fromhex("00 F8 E0 07")
