@@ -3,7 +3,12 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from dafit_open.packet_export import load_packet_events, write_packet_events
+from dafit_open.packet_export import (
+    load_packet_events,
+    summarize_packet_events,
+    write_packet_events,
+    write_packet_summary,
+)
 
 
 class PacketExportTest(unittest.TestCase):
@@ -126,6 +131,52 @@ class PacketExportTest(unittest.TestCase):
 
         self.assertIn("source,order,timestamp,direction", text)
         self.assertIn("capture.json,1,,tx", text)
+
+    def test_summarizes_packet_events(self) -> None:
+        events = [
+            {"direction": "tx", "command": 0x6E, "command_hex": "0x6E", "decoded": None},
+            {
+                "direction": "rx",
+                "command": 0x6E,
+                "command_hex": "0x6E",
+                "decoded": "watch_face_background_chunk_index index=0",
+            },
+            {"direction": "tx", "command": 0xBA, "command_hex": "0xBA", "decoded": None},
+        ]
+
+        summary = summarize_packet_events(events)
+
+        self.assertEqual(summary["events"], 3)
+        self.assertEqual(summary["tx"], 2)
+        self.assertEqual(summary["rx"], 1)
+        self.assertEqual(summary["commands"][0]["command_hex"], "0x6E")
+        self.assertEqual(summary["commands"][0]["tx"], 1)
+        self.assertEqual(summary["commands"][0]["rx"], 1)
+
+    def test_writes_packet_summary_text(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "summary.txt"
+            write_packet_summary(
+                {
+                    "events": 2,
+                    "tx": 1,
+                    "rx": 1,
+                    "commands": [
+                        {
+                            "command_hex": "0x6E",
+                            "tx": 1,
+                            "rx": 1,
+                            "first_decoded": "watch_face_background_chunk_index index=0",
+                        }
+                    ],
+                },
+                output=output,
+            )
+
+            text = output.read_text()
+
+        self.assertIn("Packet events: 2 (tx=1, rx=1)", text)
+        self.assertIn("0x6E", text)
 
 
 if __name__ == "__main__":

@@ -26,7 +26,12 @@ from .ble_probe import (
 from .collector import collect
 from .capture_export import load_workout_summaries, write_workout_export
 from .settings_export import load_settings_state, write_settings_export
-from .packet_export import load_packet_events, write_packet_events
+from .packet_export import (
+    load_packet_events,
+    summarize_packet_events,
+    write_packet_events,
+    write_packet_summary,
+)
 from .state_export import (
     load_app_state,
     summarize_app_state,
@@ -633,6 +638,18 @@ def main() -> None:
     export_packets_parser.add_argument("--format", choices=["json", "csv"], default="json")
     export_packets_parser.add_argument("--output", help="write export to a file instead of stdout")
 
+    packet_summary_parser = subparsers.add_parser(
+        "packet-summary",
+        help="summarize command counts from packet timelines",
+    )
+    packet_summary_parser.add_argument(
+        "paths",
+        nargs="*",
+        help="capture files or directories; defaults to ble-logs/",
+    )
+    packet_summary_parser.add_argument("--output", help="write summary to a file instead of stdout")
+    packet_summary_parser.add_argument("--json", action="store_true", help="write summary JSON")
+
     export_faces_parser = subparsers.add_parser(
         "export-watch-faces",
         help="export watch-face state from JSON captures",
@@ -1155,6 +1172,10 @@ def main() -> None:
     elif args.command == "export-packets":
         events = load_packet_events(args.paths)
         write_packet_events(events, args.format, output=args.output)
+    elif args.command == "packet-summary":
+        events = load_packet_events(args.paths)
+        summary = summarize_packet_events(events)
+        write_packet_summary(summary, output=args.output, json_output=args.json)
     elif args.command == "export-watch-faces":
         state = load_watch_face_state(args.paths)
         write_watch_face_export(state, output=args.output)

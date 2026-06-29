@@ -75,6 +75,72 @@ def write_packet_events(
             stream.close()
 
 
+def summarize_packet_events(events: list[dict[str, Any]]) -> dict[str, Any]:
+    by_command: dict[str, dict[str, Any]] = {}
+    by_direction = {"tx": 0, "rx": 0}
+    for event in events:
+        direction = str(event.get("direction") or "")
+        if direction in by_direction:
+            by_direction[direction] += 1
+        command_hex = event.get("command_hex") or "none"
+        record = by_command.setdefault(
+            str(command_hex),
+            {
+                "command": event.get("command"),
+                "command_hex": command_hex,
+                "tx": 0,
+                "rx": 0,
+                "first_decoded": None,
+            },
+        )
+        if direction in {"tx", "rx"}:
+            record[direction] += 1
+        if record["first_decoded"] is None and event.get("decoded"):
+            record["first_decoded"] = event["decoded"]
+    return {
+        "schema": "dafit-open.packet-summary.v1",
+        "events": len(events),
+        "tx": by_direction["tx"],
+        "rx": by_direction["rx"],
+        "commands": sorted(
+            by_command.values(),
+            key=lambda item: (-int(item["tx"]) - int(item["rx"]), str(item["command_hex"])),
+        ),
+    }
+
+
+def write_packet_summary(
+    summary: dict[str, Any],
+    output: str | Path | None = None,
+    json_output: bool = False,
+) -> None:
+    stream: TextIO
+    should_close = False
+    if output:
+        output_path = Path(output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        stream = output_path.open("w")
+        should_close = True
+    else:
+        stream = sys.stdout
+    try:
+        if json_output:
+            json.dump(summary, stream, indent=2, sort_keys=True)
+            stream.write("\n")
+        else:
+            stream.write(f"Packet events: {summary.get('events', 0)} ")
+            stream.write(f"(tx={summary.get('tx', 0)}, rx={summary.get('rx', 0)})\n")
+            for command in summary.get("commands", []):
+                stream.write(
+                    f"{command['command_hex']:>6}  "
+                    f"tx={command['tx']:<4} rx={command['rx']:<4} "
+                    f"{command.get('first_decoded') or ''}\n"
+                )
+    finally:
+        if should_close:
+            stream.close()
+
+
 def _capture_packet_events(
     capture: dict[str, Any],
     source: Path,

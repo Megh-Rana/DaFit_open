@@ -200,6 +200,7 @@ Export a chronological packet timeline from captures or imported app logs:
 ```bash
 dafit-open export-packets ble-logs --format csv --output exports/packets.csv
 dafit-open export-packets ble-logs/fireboltt148-watch-faces.json --format json
+dafit-open packet-summary ble-logs/fireboltt148-original-background-one-chunk.json
 ```
 
 Browse captured workout data in a read-only terminal UI:
