@@ -211,6 +211,8 @@ def decode_frame(frame: Frame) -> str | None:
         return f"last_24h_blood_pressure payload={hex_bytes(frame.payload)}"
     if frame.command == 0x3E:
         return f"last_24h_blood_oxygen payload={hex_bytes(frame.payload)}"
+    if frame.command == 0x74:
+        return decode_store_watch_face_transfer(frame.payload)
     if frame.command == 0x29 and frame.payload:
         return f"display_watch_face={frame.payload[0]}"
     if frame.command == 0xAB:
@@ -472,6 +474,19 @@ def decode_file_transfer_frame(payload: bytes) -> str | None:
             return f"file_transfer_crc crc=0x{crc:04X} payload={hex_bytes(payload)}"
         return f"file_transfer_crc payload={hex_bytes(payload)}"
     return f"{labels.get(payload[0], 'file_transfer')} payload={hex_bytes(payload)}"
+
+
+def decode_store_watch_face_transfer(payload: bytes) -> str | None:
+    offset = parse_store_watch_face_offset(payload)
+    if offset is not None:
+        return f"store_watch_face_offset index={offset}"
+    crc = parse_store_watch_face_crc(payload)
+    if crc is not None:
+        return f"store_watch_face_crc crc=0x{crc:04X}"
+    if len(payload) == 4 and payload[0] == 0x00:
+        size = int.from_bytes(payload[1:4], byteorder="big", signed=False)
+        return f"store_watch_face_prepare size={size}"
+    return f"store_watch_face_transfer payload={hex_bytes(payload)}"
 
 
 def decode_package_length(payload: bytes) -> str | None:
@@ -921,6 +936,16 @@ def file_transfer_abort_packet() -> Packet:
     return Packet(0xB7, bytes([0x05]))
 
 
+def store_watch_face_prepare_packet(size: int) -> Packet:
+    if not 0 <= size <= 0xFFFFFF:
+        raise ValueError(f"store watch-face size must fit in 24 bits: {size}")
+    return Packet(0x74, bytes([0x00]) + size.to_bytes(3, byteorder="big"))
+
+
+def store_watch_face_check_packet(ok: bool) -> Packet:
+    return Packet(0x74, bytes([0x00 if ok else 0x01, 0x00, 0x00, 0x00]))
+
+
 def parse_package_length(payload: bytes) -> int | None:
     payload = bytes(payload)
     if len(payload) >= 3 and payload[0] == 0x01:
@@ -941,6 +966,20 @@ def parse_file_transfer_crc(payload: bytes) -> int | None:
         return int.from_bytes(payload[3:5], byteorder="big", signed=False)
     if len(payload) >= 3 and payload[0] == 0x02:
         return int.from_bytes(payload[1:3], byteorder="big", signed=False)
+    return None
+
+
+def parse_store_watch_face_offset(payload: bytes) -> int | None:
+    payload = bytes(payload)
+    if len(payload) == 2:
+        return int.from_bytes(payload, byteorder="big", signed=False)
+    return None
+
+
+def parse_store_watch_face_crc(payload: bytes) -> int | None:
+    payload = bytes(payload)
+    if len(payload) == 4 and payload[:2] == b"\xFF\xFF":
+        return int.from_bytes(payload[2:4], byteorder="big", signed=False)
     return None
 
 

@@ -131,6 +131,28 @@ The first captured store-face upload used `/data/user/0/com.crrepa.band.dafit/fi
 streamed 576 transfer chunks, and rebuilt a 140,356-byte payload from the app
 log. This gives us a replay/decode target without copying proprietary app code.
 
+Download and inspect a store watch-face `.bin` payload:
+
+```bash
+dafit-open download-watch-face-bin https://qn-hscdn2.moyoung.com/files/77e6d813b1f8aa283d7265f051d62e13.bin \
+  --output ble-logs/moyoung-downloads/77e6d813b1f8aa283d7265f051d62e13.bin
+dafit-open inspect-watch-face-bin ble-logs/moyoung-downloads/77e6d813b1f8aa283d7265f051d62e13.bin
+dafit-open watch-face-bin-transfer-plan ble-logs/moyoung-downloads/77e6d813b1f8aa283d7265f051d62e13.bin
+```
+
+Upload of store `.bin` payloads is guarded and experimental. Da Fit transfers
+these files as 244-byte writes to `0000fee6`, so this command negotiates a large
+MTU first and stops before transfer if BlueZ cannot provide a 244-byte payload:
+
+```bash
+dafit-open upload-watch-face-bin AA:BB:CC:DD:EE:FF path/to/watch-face.bin \
+  --dry-run
+dafit-open upload-watch-face-bin AA:BB:CC:DD:EE:FF path/to/watch-face.bin \
+  --confirm --max-chunks 0 --json-out ble-logs/store-bin-handshake.json
+dafit-open upload-watch-face-bin AA:BB:CC:DD:EE:FF path/to/watch-face.bin \
+  --confirm --complete --set-display 6 --json-out ble-logs/store-bin-upload.json
+```
+
 Save structured captures under the ignored `ble-logs/` folder:
 
 ```bash

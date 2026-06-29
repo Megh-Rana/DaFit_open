@@ -43,6 +43,8 @@ from .protocol import (
     parse_file_transfer_offset,
     parse_frame,
     parse_package_length,
+    parse_store_watch_face_crc,
+    parse_store_watch_face_offset,
     parse_support_watch_faces,
     parse_watch_face_list,
     parse_watch_face_screen,
@@ -53,12 +55,19 @@ from .protocol import (
     set_do_not_disturb_time_packet,
     set_goal_steps_packet,
     set_time_system_packet,
+    store_watch_face_check_packet,
+    store_watch_face_prepare_packet,
 )
 from .watchface_image import (
     crp_crc16,
     inspect_watch_face_package,
     plan_watch_face_transfer,
     wrap_transfer_chunk,
+)
+from .watchface_store import (
+    DEFAULT_STORE_PACKET_LENGTH,
+    inspect_store_watch_face_bin,
+    plan_store_watch_face_transfer,
 )
 
 
@@ -554,6 +563,102 @@ async def upload_watch_face_raw(
                     capture["device"] = _device_snapshot(refreshed)
 
     print("upload-watch-face failed after all retries")
+    if last_error is not None:
+        print(f"last error: {type(last_error).__name__}: {last_error}")
+    _write_capture(json_out, capture)
+
+
+async def upload_store_watch_face(
+    address: str,
+    path: str,
+    packet_length: int = DEFAULT_STORE_PACKET_LENGTH,
+    max_chunks: int = 0,
+    complete: bool = False,
+    wait_timeout: float = 8.0,
+    set_display: int | None = None,
+    timeout: float = 45.0,
+    scan_timeout: float = 10.0,
+    retries: int = 1,
+    pair: bool = False,
+    direct: bool = False,
+    json_out: str | None = None,
+) -> None:
+    inspection = inspect_store_watch_face_bin(path)
+    if packet_length <= 0:
+        raise ValueError(f"packet length out of range: {packet_length}")
+    if max_chunks < 0:
+        raise ValueError(f"max chunks must be non-negative: {max_chunks}")
+
+    capture = _new_capture(
+        "upload-watch-face-bin",
+        address,
+        {
+            "path": path,
+            "packet_length": packet_length,
+            "max_chunks": max_chunks,
+            "complete": complete,
+            "wait_timeout": wait_timeout,
+            "set_display": set_display,
+            "timeout": timeout,
+            "scan_timeout": scan_timeout,
+            "retries": retries,
+            "pair": pair,
+            "direct": direct,
+        },
+    )
+    capture["store_watch_face_bin"] = inspection
+    device: BLEDevice | str
+    if direct:
+        print(f"using direct address connection for {address}")
+        device = address
+    else:
+        found_device = await _find_device(address, scan_timeout)
+        if found_device is None:
+            print(f"device not found during {scan_timeout:.1f}s scan: {address}")
+            _write_capture(json_out, capture)
+            return
+        device = found_device
+        capture["device"] = _device_snapshot(device)
+
+    last_error: BaseException | None = None
+    for attempt in range(1, retries + 1):
+        try:
+            print(f"connecting to {_device_label(device)}, attempt {attempt}/{retries}")
+            capture["attempts"].append({"attempt": attempt, "device": _device_label(device)})
+            await _upload_store_watch_face_device(
+                device,
+                path,
+                packet_length,
+                max_chunks,
+                complete,
+                wait_timeout,
+                set_display,
+                timeout,
+                pair=pair,
+                capture=capture,
+            )
+            _write_capture(json_out, capture)
+            return
+        except TimeoutError as exc:
+            last_error = exc
+            print(f"connect timed out after {timeout:.1f}s")
+            capture["errors"].append({"attempt": attempt, "type": "TimeoutError", "message": str(exc)})
+        except Exception as exc:
+            last_error = exc
+            print(f"upload-watch-face-bin failed: {type(exc).__name__}: {exc}")
+            capture["errors"].append(
+                {"attempt": attempt, "type": type(exc).__name__, "message": str(exc)}
+            )
+
+        if attempt < retries:
+            await asyncio.sleep(2)
+            if not direct:
+                refreshed = await _find_device(address, scan_timeout)
+                if refreshed is not None:
+                    device = refreshed
+                    capture["device"] = _device_snapshot(refreshed)
+
+    print("upload-watch-face-bin failed after all retries")
     if last_error is not None:
         print(f"last error: {type(last_error).__name__}: {last_error}")
     _write_capture(json_out, capture)
@@ -1311,6 +1416,152 @@ async def _upload_watch_face_raw_device(
                 if not completed:
                     print("stopping remaining files after incomplete transfer")
                     break
+        finally:
+            for char in notify_chars:
+                await client.stop_notify(char)
+
+
+async def _upload_store_watch_face_device(
+    device: BLEDevice | str,
+    path: str,
+    packet_length: int,
+    max_chunks: int,
+    complete: bool,
+    wait_timeout: float,
+    set_display: int | None,
+    timeout: float,
+    pair: bool,
+    capture: dict[str, Any],
+) -> None:
+    file_data = Path(path).read_bytes()
+    plan = plan_store_watch_face_transfer(path, packet_length=packet_length, chunk_preview_count=0)
+    capture["store_watch_face_transfer_plan"] = plan.to_dict()
+    async with BleakClient(device, timeout=timeout, pair=pair) as client:
+        print(f"connected: {client.is_connected}")
+        capture["connected"] = client.is_connected
+
+        services = client.services
+        command_char = None
+        command_with_response = True
+        transfer_char = None
+        transfer_with_response = False
+        notify_chars = []
+
+        for service in services:
+            print(f"service {service.uuid}")
+            for char in service.characteristics:
+                props = ",".join(char.properties)
+                print(f"  char {char.uuid} [{props}]")
+                uuid = char.uuid.lower()
+                if uuid == CRP_WRITE_PRIMARY and _can_write(char.properties):
+                    command_char = char
+                    command_with_response = "write" in char.properties
+                if uuid == CRP_WRITE_CMD_2 and _can_write(char.properties):
+                    transfer_char = char
+                    transfer_with_response = "write" in char.properties
+                if uuid in NOTIFY_UUIDS and "notify" in char.properties:
+                    notify_chars.append(char)
+
+        capture["services"] = _services_snapshot(services)
+        gatt_payload = await _negotiate_large_write_payload(
+            client,
+            capture,
+            required_payload=packet_length,
+        )
+        notification_queue: asyncio.Queue[bytes] = asyncio.Queue()
+
+        for char in notify_chars:
+            await client.start_notify(char, _make_notification_handler(capture, notification_queue))
+            print(f"notify enabled: {char.uuid}")
+            capture["notifications_enabled"].append(_char_snapshot(char))
+
+        try:
+            if command_char is None:
+                print("no primary write characteristic found; cannot upload watch-face bin")
+                return
+            if transfer_char is None:
+                print("no transfer write characteristic found; cannot upload watch-face bin")
+                return
+
+            capture["store_watch_face_upload"] = {
+                "packet_length": packet_length,
+                "gatt_payload": gatt_payload,
+                "large_write_ready": gatt_payload >= packet_length,
+                "complete_requested": complete,
+                "max_chunks": max_chunks,
+                "chunks_sent": 0,
+                "events": [],
+                "completed": False,
+                "display_set": None,
+            }
+            if (complete or max_chunks > 0) and gatt_payload < packet_length:
+                print(
+                    "store watch-face upload needs a single-write payload of "
+                    f"{packet_length} bytes, but negotiated payload is {gatt_payload}; "
+                    "stopping before transfer"
+                )
+                capture["store_watch_face_upload"]["error"] = "mtu_payload_too_small"
+                return
+
+            print(f"sending store watch-face prepare size={len(file_data)}")
+            await _write_packet_fragmented(
+                client,
+                command_char,
+                store_watch_face_prepare_packet(len(file_data)),
+                command_with_response,
+                gatt_payload,
+                capture,
+                channel="command",
+            )
+            await asyncio.sleep(0.15)
+
+            handshake_packets = (
+                Packet(0xB6, bytes([0x00, 0x01])),
+                Packet(0xB6, bytes([0x01, 0x01])),
+                Packet(0xBC, bytes([0x01, 0x00])),
+                Packet(0x34, bytes([0x00])),
+            )
+            for packet in handshake_packets:
+                await _write_packet_fragmented(
+                    client,
+                    command_char,
+                    packet,
+                    command_with_response,
+                    gatt_payload,
+                    capture,
+                    channel="command",
+                )
+                await asyncio.sleep(0.15)
+
+            completed = await _transfer_store_watch_face_bin(
+                client,
+                command_char,
+                command_with_response,
+                transfer_char,
+                transfer_with_response,
+                file_data,
+                packet_length,
+                gatt_payload,
+                wait_timeout,
+                complete,
+                max_chunks,
+                notification_queue,
+                capture,
+                capture["store_watch_face_upload"],
+            )
+            if completed and set_display is not None:
+                print(f"setting display watch-face slot after upload: {set_display}")
+                await _write_packet_fragmented(
+                    client,
+                    command_char,
+                    set_display_watch_face_packet(set_display),
+                    command_with_response,
+                    gatt_payload,
+                    capture,
+                    channel="command",
+                )
+                capture["store_watch_face_upload"]["display_set"] = set_display
+                await asyncio.sleep(0.5)
         finally:
             for char in notify_chars:
                 await client.stop_notify(char)
@@ -2136,6 +2387,87 @@ async def _transfer_watch_face_file(
         print(f"unhandled file-transfer event: {event}")
 
 
+async def _transfer_store_watch_face_bin(
+    client: BleakClient,
+    command_char: object,
+    command_with_response: bool,
+    transfer_char: object,
+    transfer_with_response: bool,
+    file_data: bytes,
+    packet_length: int,
+    gatt_payload: int,
+    wait_timeout: float,
+    complete: bool,
+    max_chunks: int,
+    notification_queue: asyncio.Queue[bytes],
+    capture: dict[str, Any],
+    upload_record: dict[str, Any],
+) -> bool:
+    chunks_sent = 0
+    while True:
+        event = await _wait_for_store_watch_face_event(notification_queue, wait_timeout)
+        if event is None:
+            print(f"no store watch-face event within {wait_timeout:.1f}s")
+            return False
+        upload_record["events"].append(event)
+        if event["type"] == "offset":
+            index = int(event["index"])
+            offset = index * packet_length
+            if offset >= len(file_data):
+                print(f"watch requested chunk index beyond file size: {index}")
+                return False
+            if not complete and chunks_sent >= max_chunks:
+                print(f"chunk limit reached ({max_chunks}); stopping without success check")
+                return False
+            chunk = file_data[offset : offset + packet_length]
+            print(
+                f"sending store watch-face chunk index={index} offset={offset} "
+                f"data_len={len(chunk)} crc=0x{crp_crc16(chunk):04X}"
+            )
+            if len(chunk) > gatt_payload:
+                print(
+                    f"cannot send store watch-face chunk of {len(chunk)} bytes "
+                    f"with negotiated payload {gatt_payload}; stopping"
+                )
+                upload_record["error"] = "chunk_exceeds_mtu_payload"
+                return False
+            await _write_raw_fragmented(
+                client,
+                transfer_char,
+                chunk,
+                transfer_with_response,
+                gatt_payload,
+                capture,
+                channel="store-transfer",
+                packet_command=0x74,
+                allow_fragmented=False,
+            )
+            chunks_sent += 1
+            upload_record["chunks_sent"] = chunks_sent
+            continue
+        if event["type"] == "crc":
+            expected = crp_crc16(file_data)
+            received = event.get("crc16")
+            ok = received == expected
+            print(
+                f"store watch-face CRC received={_format_optional_crc(received)} "
+                f"expected=0x{expected:04X} ok={ok}"
+            )
+            if ok:
+                await _write_packet_fragmented(
+                    client,
+                    command_char,
+                    store_watch_face_check_packet(True),
+                    command_with_response,
+                    gatt_payload,
+                    capture,
+                    channel="command",
+                )
+            upload_record["completed"] = ok
+            return ok
+        print(f"unhandled store watch-face event: {event}")
+
+
 async def _send_transfer_abort(
     client: BleakClient,
     command_char: object,
@@ -2202,6 +2534,31 @@ async def _wait_for_transfer_event(
         return {"type": "other", "payload_hex": hex_bytes(frame.payload)}
 
 
+async def _wait_for_store_watch_face_event(
+    notification_queue: asyncio.Queue[bytes],
+    timeout: float,
+) -> dict[str, Any] | None:
+    deadline = asyncio.get_running_loop().time() + timeout
+    while True:
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            return None
+        try:
+            raw = await asyncio.wait_for(notification_queue.get(), timeout=remaining)
+        except TimeoutError:
+            return None
+        frame = parse_frame(raw)
+        if frame is None or frame.command != 0x74:
+            continue
+        offset = parse_store_watch_face_offset(frame.payload)
+        if offset is not None:
+            return {"type": "offset", "index": offset, "payload_hex": hex_bytes(frame.payload)}
+        crc = parse_store_watch_face_crc(frame.payload)
+        if crc is not None:
+            return {"type": "crc", "crc16": crc, "payload_hex": hex_bytes(frame.payload)}
+        return {"type": "other", "payload_hex": hex_bytes(frame.payload)}
+
+
 async def _write_packet_fragmented(
     client: BleakClient,
     write_char: object,
@@ -2246,9 +2603,14 @@ async def _write_raw_fragmented(
     capture: dict[str, Any],
     channel: str,
     packet_command: int | None,
+    allow_fragmented: bool = True,
 ) -> None:
     if gatt_payload <= 0:
         raise ValueError(f"gatt payload out of range: {gatt_payload}")
+    if len(data) > gatt_payload and not allow_fragmented:
+        raise ValueError(
+            f"{channel} write length {len(data)} exceeds GATT payload {gatt_payload}"
+        )
     fragments = []
     for offset in range(0, len(data), gatt_payload):
         fragment = data[offset : offset + gatt_payload]
@@ -2323,6 +2685,57 @@ async def _write_packet(
 
 def _can_write(properties: Iterable[str]) -> bool:
     return "write" in properties or "write-without-response" in properties
+
+
+async def _negotiate_large_write_payload(
+    client: BleakClient,
+    capture: dict[str, Any],
+    required_payload: int,
+) -> int:
+    record: dict[str, Any] = {
+        "required_payload": required_payload,
+        "attempted": False,
+        "ok": False,
+        "mtu_size": None,
+        "payload": 20,
+    }
+    backend = getattr(client, "_backend", None)
+    acquire_mtu = getattr(backend, "_acquire_mtu", None)
+    if acquire_mtu is None:
+        record["error"] = "backend_has_no_acquire_mtu"
+        capture["mtu_negotiation"] = record
+        return 20
+
+    record["attempted"] = True
+    try:
+        await acquire_mtu()
+        record["ok"] = True
+    except Exception as exc:  # pragma: no cover - depends on BlueZ/device state
+        record["error"] = repr(exc)
+
+    mtu_size = getattr(backend, "_mtu_size", None)
+    if record["ok"]:
+        try:
+            mtu_size = client.mtu_size
+        except Exception as exc:  # pragma: no cover - defensive for backend quirks
+            record["mtu_read_error"] = repr(exc)
+
+    if isinstance(mtu_size, int) and mtu_size > 3:
+        record["mtu_size"] = mtu_size
+        record["payload"] = mtu_size - 3
+    record["meets_required"] = record["payload"] >= required_payload
+    capture["mtu_negotiation"] = record
+    if record["ok"]:
+        print(
+            f"negotiated MTU={record['mtu_size']} "
+            f"payload={record['payload']} required={required_payload}"
+        )
+    else:
+        print(
+            f"could not negotiate large-write MTU; using payload={record['payload']} "
+            f"required={required_payload}"
+        )
+    return int(record["payload"])
 
 
 def _guess_mtu_payload(client: BleakClient) -> int:

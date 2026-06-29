@@ -16,6 +16,8 @@ from dafit_open.protocol import (
     parse_file_transfer_offset,
     parse_new_alarm_list,
     parse_package_length,
+    parse_store_watch_face_crc,
+    parse_store_watch_face_offset,
     parse_support_watch_faces,
     parse_watch_face_screen,
     query_training_detail_packet,
@@ -27,6 +29,8 @@ from dafit_open.protocol import (
     set_new_alarm_packet,
     set_time_system_packet,
     set_timezone_packet,
+    store_watch_face_check_packet,
+    store_watch_face_prepare_packet,
 )
 
 
@@ -156,6 +160,30 @@ class ProtocolDecodeTest(unittest.TestCase):
         self.assertEqual(file_transfer_check_packet(True).build(), bytes.fromhex("FE EA 10 06 B7 03"))
         self.assertEqual(file_transfer_check_packet(False).build(), bytes.fromhex("FE EA 10 06 B7 04"))
         self.assertEqual(file_transfer_abort_packet().build(), bytes.fromhex("FE EA 10 06 B7 05"))
+
+    def test_decodes_store_watch_face_transfer_events(self) -> None:
+        self.assertEqual(
+            store_watch_face_prepare_packet(140356).build(),
+            bytes.fromhex("FE EA 10 09 74 00 02 24 44"),
+        )
+        self.assertEqual(
+            decode_frame(parse_frame(bytes.fromhex("FE EA 20 09 74 00 02 24 44"))),
+            "store_watch_face_prepare size=140356",
+        )
+        self.assertEqual(parse_store_watch_face_offset(bytes.fromhex("02 3F")), 575)
+        self.assertEqual(
+            decode_frame(parse_frame(bytes.fromhex("FE EA 20 07 74 02 3F"))),
+            "store_watch_face_offset index=575",
+        )
+        self.assertEqual(parse_store_watch_face_crc(bytes.fromhex("FF FF ED FA")), 0xEDFA)
+        self.assertEqual(
+            decode_frame(parse_frame(bytes.fromhex("FE EA 20 09 74 FF FF ED FA"))),
+            "store_watch_face_crc crc=0xEDFA",
+        )
+        self.assertEqual(
+            store_watch_face_check_packet(True).build(),
+            bytes.fromhex("FE EA 10 09 74 00 00 00 00"),
+        )
 
     def test_builds_settings_packets(self) -> None:
         self.assertEqual(
