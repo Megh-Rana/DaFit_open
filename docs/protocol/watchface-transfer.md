@@ -194,3 +194,93 @@ The reason is format risk, not packet framing risk: the app appears to use
 vendor-specific watch-face generators/compressors before invoking the generic
 file sender. Sending a wrong-format file should be treated as a state-changing
 experiment, not a normal read-only probe.
+
+## Store `.bin` Watch Faces
+
+Da Fit store faces use a different transfer family from the raw `0xB4`/`0xB7`
+image scaffold above. A captured app transfer for watch-face id `19719` wrote a
+140,356-byte `.bin` payload in 244-byte chunks to `0000fee6`.
+
+The store upload flow implemented in Python is:
+
+1. Send `0x74 00 <size:uint24-be>`.
+2. Send observed setup packets `0xB6 00 01`, `0xB6 01 01`, `0xBC 01 00`,
+   and `0x34 00`.
+3. Wait for `0x74 <chunk_index:uint16-be>`.
+4. Write exactly one raw chunk of `packet_length` bytes to `0000fee6`.
+5. On `0x74 FF FF <crc16:be>`, compare against the full payload CRC and send
+   `0x74 00 00 00 00` on success.
+
+FireBoltt 148 live result:
+
+- Downloaded payload size: `140356` bytes.
+- SHA-256:
+  `89f21c0b9012709535cb3d13e6794b8bc99d932d1b600f599345516745dad4f3`.
+- CRC-16 seed `0xFEEA`: `0xEDFA`.
+- The watch requested 576 chunks, returned CRC `0xEDFA`, accepted success, and
+  later reported an uploaded type `C` face.
+
+Useful commands:
+
+```bash
+dafit-open inspect-watch-face-bin ble-logs/moyoung-downloads/77e6d813b1f8aa283d7265f051d62e13.bin
+dafit-open analyze-watch-face-bin ble-logs/moyoung-downloads/77e6d813b1f8aa283d7265f051d62e13.bin
+dafit-open upload-watch-face-bin D3:05:F5:F9:B3:E5 ble-logs/moyoung-downloads/77e6d813b1f8aa283d7265f051d62e13.bin \
+  --confirm --complete --json-out ble-logs/fireboltt148-store-bin-upload.json
+```
+
+The analyzer currently looks for candidate header fields, zero runs, and
+monotonic pointer tables. The `19719.bin` payload begins with several compact
+header values and a little-endian monotonic table around offset `400`, so it
+appears to be a structured store container rather than raw framebuffer pixels.
+
+## ORIGINAL Custom Background
+
+The custom-background app path is separate from both store `.bin` and the older
+generic raw file-transfer probe. Decompiled structure shows
+`CRPWatchFaceLayoutInfo.CompressionType.ORIGINAL` sending a single big-endian
+RGB565 background through command `0x6E`.
+
+Clean-room observations:
+
+- Source bitmap is cropped/scaled to the layout size.
+- FireBoltt 148 layout logs reported `width=466`, `height=466`,
+  `thumWidth=280`, and `thumHeight=280`.
+- ORIGINAL pixels are encoded as RGB565 in big-endian byte order.
+- The size packet is `0x6E <size:uint32-be>`.
+- Check packets use command `0x6E` with `00 00 00 00` for success and
+  `FF FF FF FF` for failure.
+- Data chunks use the same BLE file chunk wrapper as `ua.b`:
+  `FE <crc16:be> <len:uint8> <chunk>` or
+  `FF FF <crc16:be> <len:uint8> <chunk>` for packet length `64`.
+
+For a 466x466 ORIGINAL background, the raw payload size is:
+
+```text
+466 * 466 * 2 = 434312 bytes
+```
+
+The expected size packet is:
+
+```text
+FE EA 10 09 6E 00 06 A0 88
+```
+
+Dry-run commands:
+
+```bash
+dafit-open build-original-background photo.png --out-dir /tmp/dafit-original-bg
+dafit-open original-background-transfer-plan /tmp/dafit-original-bg --packet-length 64
+dafit-open upload-original-background D3:05:F5:F9:B3:E5 /tmp/dafit-original-bg --dry-run
+```
+
+Bounded live handshake:
+
+```bash
+dafit-open upload-original-background D3:05:F5:F9:B3:E5 /tmp/dafit-original-bg \
+  --confirm --experimental-original --max-chunks 0 \
+  --json-out ble-logs/fireboltt148-original-background-handshake.json
+```
+
+Do not run `--complete` until the handshake capture confirms the watch responds
+with a sane offset or chunk-index event for this `0x6E` path.

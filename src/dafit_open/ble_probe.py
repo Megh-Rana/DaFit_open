@@ -57,10 +57,12 @@ from .protocol import (
     set_time_system_packet,
     store_watch_face_check_packet,
     store_watch_face_prepare_packet,
+    watch_face_background_check_packet,
 )
 from .watchface_image import (
     crp_crc16,
     inspect_watch_face_package,
+    plan_original_background_transfer,
     plan_watch_face_transfer,
     wrap_transfer_chunk,
 )
@@ -659,6 +661,103 @@ async def upload_store_watch_face(
                     capture["device"] = _device_snapshot(refreshed)
 
     print("upload-watch-face-bin failed after all retries")
+    if last_error is not None:
+        print(f"last error: {type(last_error).__name__}: {last_error}")
+    _write_capture(json_out, capture)
+
+
+async def upload_original_background(
+    address: str,
+    package_dir: str,
+    packet_length: int | None = None,
+    max_chunks: int = 0,
+    complete: bool = False,
+    wait_timeout: float = 8.0,
+    timeout: float = 45.0,
+    scan_timeout: float = 10.0,
+    retries: int = 1,
+    pair: bool = False,
+    direct: bool = False,
+    json_out: str | None = None,
+) -> None:
+    plan = plan_original_background_transfer(
+        package_dir,
+        packet_length=packet_length or 64,
+        chunk_preview_count=0,
+    )
+    if packet_length is not None and packet_length <= 0:
+        raise ValueError(f"packet length out of range: {packet_length}")
+    if max_chunks < 0:
+        raise ValueError(f"max chunks must be non-negative: {max_chunks}")
+
+    capture = _new_capture(
+        "upload-original-background",
+        address,
+        {
+            "package_dir": package_dir,
+            "packet_length": packet_length,
+            "max_chunks": max_chunks,
+            "complete": complete,
+            "wait_timeout": wait_timeout,
+            "timeout": timeout,
+            "scan_timeout": scan_timeout,
+            "retries": retries,
+            "pair": pair,
+            "direct": direct,
+        },
+    )
+    capture["original_background_plan"] = plan.to_dict()
+    device: BLEDevice | str
+    if direct:
+        print(f"using direct address connection for {address}")
+        device = address
+    else:
+        found_device = await _find_device(address, scan_timeout)
+        if found_device is None:
+            print(f"device not found during {scan_timeout:.1f}s scan: {address}")
+            _write_capture(json_out, capture)
+            return
+        device = found_device
+        capture["device"] = _device_snapshot(device)
+
+    last_error: BaseException | None = None
+    for attempt in range(1, retries + 1):
+        try:
+            print(f"connecting to {_device_label(device)}, attempt {attempt}/{retries}")
+            capture["attempts"].append({"attempt": attempt, "device": _device_label(device)})
+            await _upload_original_background_device(
+                device,
+                package_dir,
+                packet_length,
+                max_chunks,
+                complete,
+                wait_timeout,
+                timeout,
+                pair=pair,
+                capture=capture,
+            )
+            _write_capture(json_out, capture)
+            return
+        except TimeoutError as exc:
+            last_error = exc
+            print(f"connect timed out after {timeout:.1f}s")
+            capture["errors"].append({"attempt": attempt, "type": "TimeoutError", "message": str(exc)})
+        except Exception as exc:
+            last_error = exc
+            print(f"upload-original-background failed: {type(exc).__name__}: {exc}")
+            capture["errors"].append(
+                {"attempt": attempt, "type": type(exc).__name__, "message": str(exc)}
+            )
+
+        if attempt < retries:
+            await asyncio.sleep(2)
+            if not direct:
+                refreshed = await _find_device(address, scan_timeout)
+                if refreshed is not None:
+                    device = refreshed
+                    capture["device"] = _device_snapshot(refreshed)
+
+    print("upload-original-background failed after all retries")
     if last_error is not None:
         print(f"last error: {type(last_error).__name__}: {last_error}")
     _write_capture(json_out, capture)
@@ -1567,6 +1666,141 @@ async def _upload_store_watch_face_device(
                 await client.stop_notify(char)
 
 
+async def _upload_original_background_device(
+    device: BLEDevice | str,
+    package_dir: str,
+    packet_length: int | None,
+    max_chunks: int,
+    complete: bool,
+    wait_timeout: float,
+    timeout: float,
+    pair: bool,
+    capture: dict[str, Any],
+) -> None:
+    package_path = Path(package_dir)
+    file_data = (package_path / "background.rgb565").read_bytes()
+    async with BleakClient(device, timeout=timeout, pair=pair) as client:
+        print(f"connected: {client.is_connected}")
+        capture["connected"] = client.is_connected
+
+        services = client.services
+        command_char = None
+        command_with_response = True
+        transfer_char = None
+        transfer_with_response = False
+        notify_chars = []
+
+        for service in services:
+            print(f"service {service.uuid}")
+            for char in service.characteristics:
+                props = ",".join(char.properties)
+                print(f"  char {char.uuid} [{props}]")
+                uuid = char.uuid.lower()
+                if uuid == CRP_WRITE_PRIMARY and _can_write(char.properties):
+                    command_char = char
+                    command_with_response = "write" in char.properties
+                if uuid == CRP_WRITE_CMD_2 and _can_write(char.properties):
+                    transfer_char = char
+                    transfer_with_response = "write" in char.properties
+                if uuid in NOTIFY_UUIDS and "notify" in char.properties:
+                    notify_chars.append(char)
+
+        capture["services"] = _services_snapshot(services)
+        gatt_payload = await _negotiate_large_write_payload(
+            client,
+            capture,
+            required_payload=max(packet_length or 64, 64) + 5,
+        )
+        notification_queue: asyncio.Queue[bytes] = asyncio.Queue()
+
+        for char in notify_chars:
+            await client.start_notify(char, _make_notification_handler(capture, notification_queue))
+            print(f"notify enabled: {char.uuid}")
+            capture["notifications_enabled"].append(_char_snapshot(char))
+
+        try:
+            if command_char is None:
+                print("no primary write characteristic found; cannot upload original background")
+                return
+            if transfer_char is None:
+                print("no transfer write characteristic found; cannot upload original background")
+                return
+
+            negotiated = packet_length
+            plan = plan_original_background_transfer(
+                package_dir,
+                packet_length=negotiated or 64,
+                chunk_preview_count=0,
+            )
+            capture["original_background_transfer"] = {
+                "packet_length": negotiated,
+                "gatt_payload": gatt_payload,
+                "complete_requested": complete,
+                "max_chunks": max_chunks,
+                "chunks_sent": 0,
+                "events": [],
+                "completed": False,
+            }
+
+            print(f"sending original background size={len(file_data)}")
+            await _write_packet_fragmented(
+                client,
+                command_char,
+                plan.size_packet,
+                command_with_response,
+                gatt_payload,
+                capture,
+                channel="command",
+            )
+            await asyncio.sleep(0.2)
+
+            if negotiated is None:
+                print("negotiating file packet length with cmd=0xBA")
+                await _write_packet_fragmented(
+                    client,
+                    command_char,
+                    QUERY_FILE_TRANSFER_PACKET_LENGTH,
+                    command_with_response,
+                    gatt_payload,
+                    capture,
+                    channel="command",
+                )
+                negotiated = await _wait_for_package_length(notification_queue, wait_timeout)
+                if negotiated is None:
+                    negotiated = 64
+                    print(f"no package-length response within {wait_timeout:.1f}s; falling back to {negotiated}")
+                else:
+                    print(f"negotiated file packet length: {negotiated}")
+                plan = plan_original_background_transfer(
+                    package_dir,
+                    packet_length=negotiated,
+                    chunk_preview_count=0,
+                )
+                capture["original_background_plan"] = plan.to_dict()
+                capture["original_background_transfer"]["packet_length"] = negotiated
+
+            completed = await _transfer_original_background(
+                client,
+                command_char,
+                command_with_response,
+                transfer_char,
+                transfer_with_response,
+                file_data,
+                negotiated,
+                gatt_payload,
+                wait_timeout,
+                complete,
+                max_chunks,
+                notification_queue,
+                capture,
+                capture["original_background_transfer"],
+            )
+            capture["original_background_transfer"]["completed"] = completed
+        finally:
+            for char in notify_chars:
+                await client.stop_notify(char)
+
+
 async def _set_settings_device(
     device: BLEDevice | str,
     packets: list[tuple[str, Packet]],
@@ -2468,6 +2702,139 @@ async def _transfer_store_watch_face_bin(
         print(f"unhandled store watch-face event: {event}")
 
 
+async def _transfer_original_background(
+    client: BleakClient,
+    command_char: object,
+    command_with_response: bool,
+    transfer_char: object,
+    transfer_with_response: bool,
+    file_data: bytes,
+    packet_length: int,
+    gatt_payload: int,
+    wait_timeout: float,
+    complete: bool,
+    max_chunks: int,
+    notification_queue: asyncio.Queue[bytes],
+    capture: dict[str, Any],
+    upload_record: dict[str, Any],
+) -> bool:
+    chunks_sent = 0
+    while True:
+        event = await _wait_for_original_background_event(notification_queue, wait_timeout)
+        if event is None:
+            print(f"no original background event within {wait_timeout:.1f}s")
+            return False
+        upload_record["events"].append(event)
+        if event["type"] == "offset":
+            offset = int(event["offset"])
+            if offset >= len(file_data):
+                print(f"watch requested offset beyond background size: {offset}")
+                await _send_original_background_check(
+                    client,
+                    command_char,
+                    command_with_response,
+                    gatt_payload,
+                    capture,
+                    ok=False,
+                )
+                return False
+            if not complete and chunks_sent >= max_chunks:
+                print(f"chunk limit reached ({max_chunks}); sending failed background check")
+                await _send_original_background_check(
+                    client,
+                    command_char,
+                    command_with_response,
+                    gatt_payload,
+                    capture,
+                    ok=False,
+                )
+                upload_record["aborted"] = True
+                return False
+            chunk = file_data[offset : offset + packet_length]
+            frame = wrap_transfer_chunk(chunk, packet_length)
+            print(
+                f"sending original background chunk offset={offset} data_len={len(chunk)} "
+                f"crc=0x{crp_crc16(chunk):04X}"
+            )
+            await _write_raw_fragmented(
+                client,
+                transfer_char,
+                frame,
+                transfer_with_response,
+                gatt_payload,
+                capture,
+                channel="original-background-transfer",
+                packet_command=0x6E,
+            )
+            chunks_sent += 1
+            upload_record["chunks_sent"] = chunks_sent
+            continue
+        if event["type"] == "index":
+            index = int(event["index"])
+            offset = index * packet_length
+            event["derived_offset"] = offset
+            if offset >= len(file_data):
+                print(f"watch requested chunk index beyond background size: {index}")
+                await _send_original_background_check(
+                    client,
+                    command_char,
+                    command_with_response,
+                    gatt_payload,
+                    capture,
+                    ok=False,
+                )
+                return False
+            if not complete and chunks_sent >= max_chunks:
+                print(f"chunk limit reached ({max_chunks}); sending failed background check")
+                await _send_original_background_check(
+                    client,
+                    command_char,
+                    command_with_response,
+                    gatt_payload,
+                    capture,
+                    ok=False,
+                )
+                upload_record["aborted"] = True
+                return False
+            chunk = file_data[offset : offset + packet_length]
+            frame = wrap_transfer_chunk(chunk, packet_length)
+            print(
+                f"sending original background chunk index={index} offset={offset} "
+                f"data_len={len(chunk)} crc=0x{crp_crc16(chunk):04X}"
+            )
+            await _write_raw_fragmented(
+                client,
+                transfer_char,
+                frame,
+                transfer_with_response,
+                gatt_payload,
+                capture,
+                channel="original-background-transfer",
+                packet_command=0x6E,
+            )
+            chunks_sent += 1
+            upload_record["chunks_sent"] = chunks_sent
+            continue
+        if event["type"] == "crc":
+            expected = crp_crc16(file_data)
+            received = event.get("crc16")
+            ok = received == expected
+            print(
+                f"original background CRC received={_format_optional_crc(received)} "
+                f"expected=0x{expected:04X} ok={ok}"
+            )
+            await _send_original_background_check(
+                client,
+                command_char,
+                command_with_response,
+                gatt_payload,
+                capture,
+                ok=ok,
+            )
+            return ok
+        print(f"unhandled original background event: {event}")
+
+
 async def _send_transfer_abort(
     client: BleakClient,
     command_char: object,
@@ -2486,6 +2853,25 @@ async def _send_transfer_abort(
         channel="command",
     )
     file_record["aborted"] = True
+
+
+async def _send_original_background_check(
+    client: BleakClient,
+    command_char: object,
+    command_with_response: bool,
+    gatt_payload: int,
+    capture: dict[str, Any],
+    ok: bool,
+) -> None:
+    await _write_packet_fragmented(
+        client,
+        command_char,
+        watch_face_background_check_packet(ok),
+        command_with_response,
+        gatt_payload,
+        capture,
+        channel="command",
+    )
 
 
 async def _wait_for_package_length(
@@ -2557,6 +2943,61 @@ async def _wait_for_store_watch_face_event(
         if crc is not None:
             return {"type": "crc", "crc16": crc, "payload_hex": hex_bytes(frame.payload)}
         return {"type": "other", "payload_hex": hex_bytes(frame.payload)}
+
+
+async def _wait_for_original_background_event(
+    notification_queue: asyncio.Queue[bytes],
+    timeout: float,
+) -> dict[str, Any] | None:
+    deadline = asyncio.get_running_loop().time() + timeout
+    while True:
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            return None
+        try:
+            raw = await asyncio.wait_for(notification_queue.get(), timeout=remaining)
+        except TimeoutError:
+            return None
+        frame = parse_frame(raw)
+        if frame is None or frame.command not in {0x6E, 0xB7, 0x74}:
+            continue
+        offset = parse_file_transfer_offset(frame.payload)
+        if offset is not None:
+            return {
+                "type": "offset",
+                "command": frame.command,
+                "offset": offset,
+                "payload_hex": hex_bytes(frame.payload),
+            }
+        crc = parse_file_transfer_crc(frame.payload)
+        if crc is not None:
+            return {
+                "type": "crc",
+                "command": frame.command,
+                "crc16": crc,
+                "payload_hex": hex_bytes(frame.payload),
+            }
+        index = parse_store_watch_face_offset(frame.payload)
+        if index is not None:
+            return {
+                "type": "index",
+                "command": frame.command,
+                "index": index,
+                "payload_hex": hex_bytes(frame.payload),
+            }
+        store_crc = parse_store_watch_face_crc(frame.payload)
+        if store_crc is not None:
+            return {
+                "type": "crc",
+                "command": frame.command,
+                "crc16": store_crc,
+                "payload_hex": hex_bytes(frame.payload),
+            }
+        return {
+            "type": "other",
+            "command": frame.command,
+            "payload_hex": hex_bytes(frame.payload),
+        }
 
 
 async def _write_packet_fragmented(

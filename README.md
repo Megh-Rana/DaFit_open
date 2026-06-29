@@ -153,6 +153,30 @@ dafit-open upload-watch-face-bin AA:BB:CC:DD:EE:FF path/to/watch-face.bin \
   --confirm --complete --set-display 6 --json-out ble-logs/store-bin-upload.json
 ```
 
+FireBoltt 148 store `.bin` upload has been live-tested with the downloaded
+19719 face. The watch accepted all 576 chunks, returned the expected CRC, and
+reported the uploaded face as a new type `C` slot afterward.
+
+Build a clean-room custom ORIGINAL background package from an image. This path
+comes from the app's `CompressionType.ORIGINAL` custom-background flow and
+writes a single big-endian RGB565 `background.rgb565` payload:
+
+```bash
+dafit-open build-original-background photo.png --out-dir original-background-package
+dafit-open original-background-transfer-plan original-background-package --packet-length 64
+dafit-open upload-original-background AA:BB:CC:DD:EE:FF original-background-package --dry-run
+```
+
+The live ORIGINAL uploader is newly reverse engineered, so start with the
+handshake-only mode. It sends the `0x6E` background-size packet, listens for the
+watch's transfer event shape, and stops before streaming image data:
+
+```bash
+dafit-open upload-original-background AA:BB:CC:DD:EE:FF original-background-package \
+  --confirm --experimental-original --max-chunks 0 \
+  --json-out ble-logs/original-background-handshake.json
+```
+
 Save structured captures under the ignored `ble-logs/` folder:
 
 ```bash

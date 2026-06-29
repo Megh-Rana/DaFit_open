@@ -31,6 +31,8 @@ from dafit_open.protocol import (
     set_timezone_packet,
     store_watch_face_check_packet,
     store_watch_face_prepare_packet,
+    watch_face_background_check_packet,
+    watch_face_background_size_packet,
 )
 
 
@@ -183,6 +185,32 @@ class ProtocolDecodeTest(unittest.TestCase):
         self.assertEqual(
             store_watch_face_check_packet(True).build(),
             bytes.fromhex("FE EA 10 09 74 00 00 00 00"),
+        )
+
+    def test_builds_original_background_transfer_packets(self) -> None:
+        self.assertEqual(
+            watch_face_background_size_packet(434312).build(),
+            bytes.fromhex("FE EA 10 09 6E 00 06 A0 88"),
+        )
+        self.assertEqual(
+            decode_frame(parse_frame(bytes.fromhex("FE EA 10 09 6E 00 06 A0 88"))),
+            "watch_face_background_size size=434312",
+        )
+        self.assertEqual(
+            watch_face_background_check_packet(True).build(),
+            bytes.fromhex("FE EA 10 09 6E 00 00 00 00"),
+        )
+        self.assertEqual(
+            decode_frame(parse_frame(bytes.fromhex("FE EA 10 09 6E FF FF FF FF"))),
+            "watch_face_background_check_failed",
+        )
+        self.assertEqual(
+            decode_frame(parse_frame(bytes.fromhex("FE EA 20 0A 6E 01 40 00 00 00"))),
+            "watch_face_background_offset offset=64",
+        )
+        self.assertEqual(
+            decode_frame(parse_frame(bytes.fromhex("FE EA 20 0A 6E 02 00 00 76 3D"))),
+            "watch_face_background_crc crc=0x763D payload=02 00 00 76 3D",
         )
 
     def test_builds_settings_packets(self) -> None:

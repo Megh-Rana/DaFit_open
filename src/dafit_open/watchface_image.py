@@ -12,6 +12,8 @@ from .protocol import (
     Packet,
     file_transfer_start_packet,
     hex_bytes,
+    watch_face_background_check_packet,
+    watch_face_background_size_packet,
     watch_face_transfer_prepare_packet,
 )
 
@@ -92,6 +94,35 @@ class WatchFacePlan:
         }
 
 
+@dataclass(frozen=True)
+class OriginalBackgroundPlan:
+    width: int
+    height: int
+    packet_length: int
+    payload_size: int
+    payload_sha256: str
+    payload_crc16: int
+    size_packet: Packet
+    success_packet: Packet
+    chunks: list[dict[str, Any]]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "format": "original-rgb565-background",
+            "width": self.width,
+            "height": self.height,
+            "packet_length": self.packet_length,
+            "payload_size": self.payload_size,
+            "payload_sha256": self.payload_sha256,
+            "payload_crc16": f"0x{self.payload_crc16:04X}",
+            "packets": {
+                "size": _packet_dict(self.size_packet),
+                "success": _packet_dict(self.success_packet),
+                "chunks": self.chunks,
+            },
+        }
+
+
 def build_watch_face_package(
     image_path: str | Path,
     out_dir: str | Path,
@@ -131,6 +162,43 @@ def build_watch_face_package(
         "notes": [
             "raw-rgb565 is an experimental local package format",
             "the Da Fit app normally compresses watch-face images before transfer",
+        ],
+    }
+    manifest_path = output / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    return manifest
+
+
+def build_original_background_package(
+    image_path: str | Path,
+    out_dir: str | Path,
+    width: int = 466,
+    height: int = 466,
+) -> dict[str, Any]:
+    source = load_image(image_path)
+    face = source.resized_cover(width, height)
+
+    output = Path(out_dir)
+    output.mkdir(parents=True, exist_ok=True)
+    payload_path = output / "background.rgb565"
+    preview_path = output / "preview.ppm"
+    payload_path.write_bytes(face.to_rgb565("big"))
+    preview_path.write_bytes(face.to_ppm())
+
+    manifest = {
+        "schema": "dafit-open.original-background-package.v1",
+        "source": str(image_path),
+        "format": "original-rgb565-background",
+        "byteorder": "big",
+        "width": width,
+        "height": height,
+        "files": [
+            _file_record(payload_path, "background"),
+            _file_record(preview_path, "preview"),
+        ],
+        "notes": [
+            "Matches the CRPWatchFaceLayoutInfo.CompressionType.ORIGINAL background path.",
+            "The app encodes ORIGINAL background pixels as big-endian RGB565 before chunk wrapping.",
         ],
     }
     manifest_path = output / "manifest.json"
@@ -209,6 +277,43 @@ def inspect_watch_face_package(package_dir: str | Path) -> dict[str, Any]:
     }
 
 
+def plan_original_background_transfer(
+    package_dir: str | Path,
+    packet_length: int = 256,
+    chunk_preview_count: int = 2,
+) -> OriginalBackgroundPlan:
+    if packet_length <= 0 or packet_length > 0xFFFF:
+        raise ValueError(f"packet length out of range: {packet_length}")
+    package_path = Path(package_dir)
+    manifest = load_package_manifest(package_path)
+    if manifest.get("format") != "original-rgb565-background":
+        raise ValueError(f"not an original background package: {package_path}")
+    payload_path = package_path / "background.rgb565"
+    payload = payload_path.read_bytes()
+    chunks = []
+    for offset in _chunk_offsets(len(payload), packet_length, chunk_preview_count):
+        chunk_data = payload[offset : offset + packet_length]
+        chunks.append(
+            {
+                "offset": offset,
+                "data_len": len(chunk_data),
+                "crc16": f"0x{crp_crc16(chunk_data):04X}",
+                "frame_hex": hex_bytes(wrap_transfer_chunk(chunk_data, packet_length)),
+            }
+        )
+    return OriginalBackgroundPlan(
+        width=int(manifest["width"]),
+        height=int(manifest["height"]),
+        packet_length=packet_length,
+        payload_size=len(payload),
+        payload_sha256=hashlib.sha256(payload).hexdigest(),
+        payload_crc16=crp_crc16(payload),
+        size_packet=watch_face_background_size_packet(len(payload)),
+        success_packet=watch_face_background_check_packet(True),
+        chunks=chunks,
+    )
+
+
 def plan_watch_face_transfer(
     package_dir: str | Path,
     transfer_type: int = 14,
@@ -276,6 +381,19 @@ def plan_watch_face_transfer(
 
 
 def write_transfer_plan(plan: WatchFacePlan, output: str | Path | None = None) -> None:
+    text = json.dumps(plan.to_dict(), indent=2, sort_keys=True) + "\n"
+    if output:
+        destination = Path(output)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(text)
+    else:
+        print(text, end="")
+
+
+def write_original_background_plan(
+    plan: OriginalBackgroundPlan,
+    output: str | Path | None = None,
+) -> None:
     text = json.dumps(plan.to_dict(), indent=2, sort_keys=True) + "\n"
     if output:
         destination = Path(output)

@@ -211,6 +211,8 @@ def decode_frame(frame: Frame) -> str | None:
         return f"last_24h_blood_pressure payload={hex_bytes(frame.payload)}"
     if frame.command == 0x3E:
         return f"last_24h_blood_oxygen payload={hex_bytes(frame.payload)}"
+    if frame.command == 0x6E:
+        return decode_watch_face_background_transfer(frame.payload)
     if frame.command == 0x74:
         return decode_store_watch_face_transfer(frame.payload)
     if frame.command == 0x29 and frame.payload:
@@ -474,6 +476,24 @@ def decode_file_transfer_frame(payload: bytes) -> str | None:
             return f"file_transfer_crc crc=0x{crc:04X} payload={hex_bytes(payload)}"
         return f"file_transfer_crc payload={hex_bytes(payload)}"
     return f"{labels.get(payload[0], 'file_transfer')} payload={hex_bytes(payload)}"
+
+
+def decode_watch_face_background_transfer(payload: bytes) -> str | None:
+    payload = bytes(payload)
+    offset = parse_file_transfer_offset(payload)
+    if offset is not None:
+        return f"watch_face_background_offset offset={offset}"
+    crc = parse_file_transfer_crc(payload)
+    if crc is not None:
+        return f"watch_face_background_crc crc=0x{crc:04X} payload={hex_bytes(payload)}"
+    if len(payload) != 4:
+        return f"watch_face_background_transfer payload={hex_bytes(payload)}"
+    if payload == b"\x00\x00\x00\x00":
+        return "watch_face_background_check_ok"
+    if payload == b"\xFF\xFF\xFF\xFF":
+        return "watch_face_background_check_failed"
+    size = int.from_bytes(payload, byteorder="big", signed=False)
+    return f"watch_face_background_size size={size}"
 
 
 def decode_store_watch_face_transfer(payload: bytes) -> str | None:
@@ -934,6 +954,16 @@ def file_transfer_check_packet(ok: bool) -> Packet:
 
 def file_transfer_abort_packet() -> Packet:
     return Packet(0xB7, bytes([0x05]))
+
+
+def watch_face_background_size_packet(size: int) -> Packet:
+    if not 0 <= size <= 0xFFFFFFFF:
+        raise ValueError(f"background size must fit in uint32: {size}")
+    return Packet(0x6E, size.to_bytes(4, byteorder="big"))
+
+
+def watch_face_background_check_packet(ok: bool) -> Packet:
+    return Packet(0x6E, b"\x00\x00\x00\x00" if ok else b"\xFF\xFF\xFF\xFF")
 
 
 def store_watch_face_prepare_packet(size: int) -> Packet:

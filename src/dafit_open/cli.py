@@ -17,6 +17,7 @@ from .ble_probe import (
     sync_training,
     training_detail,
     training_series,
+    upload_original_background,
     upload_store_watch_face,
     upload_watch_face_raw,
     watch_faces,
@@ -29,12 +30,16 @@ from .state_export import load_app_state, write_app_state
 from .tui import run_capture_tui
 from .watchface_export import load_watch_face_state, write_watch_face_export
 from .watchface_image import (
+    build_original_background_package,
     build_watch_face_package,
     inspect_watch_face_package,
     plan_watch_face_transfer,
+    plan_original_background_transfer,
+    write_original_background_plan,
     write_transfer_plan,
 )
 from .watchface_store import (
+    analyze_store_watch_face_bin,
     download_store_watch_face_bin,
     inspect_store_watch_face_bin,
     plan_store_watch_face_transfer,
@@ -181,6 +186,64 @@ def main() -> None:
     )
     inspect_face_parser.add_argument("package_dir", help="directory from build-watch-face")
 
+    original_bg_parser = subparsers.add_parser(
+        "build-original-background",
+        help="build a dry-run ORIGINAL custom-background package",
+    )
+    original_bg_parser.add_argument("image", help="source image; PPM works without extra deps")
+    original_bg_parser.add_argument("--out-dir", required=True, help="output package directory")
+    original_bg_parser.add_argument("--width", type=int, default=466)
+    original_bg_parser.add_argument("--height", type=int, default=466)
+
+    original_bg_plan_parser = subparsers.add_parser(
+        "original-background-transfer-plan",
+        help="print a dry-run ORIGINAL custom-background transfer plan",
+    )
+    original_bg_plan_parser.add_argument("package_dir")
+    original_bg_plan_parser.add_argument("--packet-length", type=int, default=256)
+    original_bg_plan_parser.add_argument("--chunk-preview-count", type=int, default=2)
+    original_bg_plan_parser.add_argument("--output", help="write plan JSON to a file")
+
+    upload_original_bg_parser = subparsers.add_parser(
+        "upload-original-background",
+        help="guarded experimental upload of an ORIGINAL custom-background package",
+    )
+    upload_original_bg_parser.add_argument("address")
+    upload_original_bg_parser.add_argument("package_dir")
+    upload_original_bg_parser.add_argument("--timeout", type=float, default=45.0)
+    upload_original_bg_parser.add_argument("--scan-timeout", type=float, default=10.0)
+    upload_original_bg_parser.add_argument("--retries", type=int, default=1)
+    upload_original_bg_parser.add_argument("--pair", action="store_true")
+    upload_original_bg_parser.add_argument("--direct", action="store_true")
+    upload_original_bg_parser.add_argument("--wait-timeout", type=float, default=8.0)
+    upload_original_bg_parser.add_argument(
+        "--packet-length",
+        type=int,
+        help="override negotiated file packet length",
+    )
+    upload_original_bg_parser.add_argument("--max-chunks", type=int, default=0)
+    upload_original_bg_parser.add_argument(
+        "--complete",
+        action="store_true",
+        help="stream all chunks requested by the watch",
+    )
+    upload_original_bg_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print transfer plan without connecting",
+    )
+    upload_original_bg_parser.add_argument(
+        "--confirm",
+        action="store_true",
+        help="required because this writes custom background state",
+    )
+    upload_original_bg_parser.add_argument(
+        "--experimental-original",
+        action="store_true",
+        help="acknowledge that ORIGINAL background upload is newly reverse engineered",
+    )
+    upload_original_bg_parser.add_argument("--json-out", help="write a structured JSON capture")
+
     download_store_face_parser = subparsers.add_parser(
         "download-watch-face-bin",
         help="download a Da Fit store watch-face .bin file",
@@ -193,6 +256,13 @@ def main() -> None:
         help="inspect a Da Fit store watch-face .bin file",
     )
     inspect_store_face_parser.add_argument("path")
+
+    analyze_store_face_parser = subparsers.add_parser(
+        "analyze-watch-face-bin",
+        help="analyze candidate fields inside a Da Fit store watch-face .bin file",
+    )
+    analyze_store_face_parser.add_argument("path")
+    analyze_store_face_parser.add_argument("--scan-limit", type=int, default=4096)
 
     store_face_plan_parser = subparsers.add_parser(
         "watch-face-bin-transfer-plan",
@@ -719,6 +789,62 @@ def main() -> None:
         except (ValueError, OSError, json.JSONDecodeError) as exc:
             parser.error(str(exc))
         print(json.dumps(inspection, indent=2, sort_keys=True))
+    elif args.command == "build-original-background":
+        try:
+            manifest = build_original_background_package(
+                args.image,
+                args.out_dir,
+                width=args.width,
+                height=args.height,
+            )
+        except (ValueError, OSError, RuntimeError) as exc:
+            parser.error(str(exc))
+        print(f"wrote original background package: {args.out_dir}")
+        print(json.dumps(manifest, indent=2, sort_keys=True))
+    elif args.command == "original-background-transfer-plan":
+        try:
+            plan = plan_original_background_transfer(
+                args.package_dir,
+                packet_length=args.packet_length,
+                chunk_preview_count=args.chunk_preview_count,
+            )
+        except (ValueError, OSError, json.JSONDecodeError) as exc:
+            parser.error(str(exc))
+        write_original_background_plan(plan, output=args.output)
+    elif args.command == "upload-original-background":
+        try:
+            plan = plan_original_background_transfer(
+                args.package_dir,
+                packet_length=args.packet_length or 64,
+            )
+        except (ValueError, OSError, json.JSONDecodeError) as exc:
+            parser.error(str(exc))
+        if args.dry_run:
+            write_original_background_plan(plan)
+            return
+        if not args.confirm or not args.experimental_original:
+            parser.error(
+                "upload-original-background changes watch state; "
+                "rerun with --confirm --experimental-original after reviewing --dry-run"
+            )
+        if args.complete is False and args.max_chunks == 0:
+            print("handshake-only mode: will stop after the first transfer event")
+        asyncio.run(
+            upload_original_background(
+                args.address,
+                args.package_dir,
+                packet_length=args.packet_length,
+                max_chunks=args.max_chunks,
+                complete=args.complete,
+                wait_timeout=args.wait_timeout,
+                timeout=args.timeout,
+                scan_timeout=args.scan_timeout,
+                retries=args.retries,
+                pair=args.pair,
+                direct=args.direct,
+                json_out=args.json_out,
+            )
+        )
     elif args.command == "download-watch-face-bin":
         try:
             info = download_store_watch_face_bin(args.url, args.output)
@@ -731,6 +857,12 @@ def main() -> None:
         except OSError as exc:
             parser.error(str(exc))
         print(json.dumps(inspection, indent=2, sort_keys=True))
+    elif args.command == "analyze-watch-face-bin":
+        try:
+            analysis = analyze_store_watch_face_bin(args.path, scan_limit=args.scan_limit)
+        except OSError as exc:
+            parser.error(str(exc))
+        print(json.dumps(analysis, indent=2, sort_keys=True))
     elif args.command == "watch-face-bin-transfer-plan":
         try:
             plan = plan_store_watch_face_transfer(

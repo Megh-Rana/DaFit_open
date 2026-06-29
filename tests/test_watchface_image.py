@@ -6,10 +6,12 @@ import unittest
 
 from dafit_open.watchface_image import (
     PixelImage,
+    build_original_background_package,
     build_watch_face_package,
     crp_crc16,
     inspect_watch_face_package,
     load_image,
+    plan_original_background_transfer,
     plan_watch_face_transfer,
     wrap_transfer_chunk,
 )
@@ -99,6 +101,25 @@ class WatchFaceImageTest(unittest.TestCase):
                 plan.start_packets[0][1].build(),
                 bytes.fromhex("FE EA 10 13 B7 00 0E 02 00 00 00 66 61 63 65 2E 62 69 6E"),
             )
+
+    def test_builds_original_background_package_and_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            source = directory / "source.ppm"
+            source.write_bytes(b"P6\n2 1\n255\n" + bytes([255, 0, 0, 0, 255, 0]))
+            package = directory / "original"
+
+            manifest = build_original_background_package(source, package, width=2, height=1)
+            plan = plan_original_background_transfer(package, packet_length=4)
+
+            self.assertEqual(manifest["schema"], "dafit-open.original-background-package.v1")
+            self.assertEqual((package / "background.rgb565").read_bytes(), bytes.fromhex("F8 00 07 E0"))
+            self.assertEqual(plan.payload_size, 4)
+            self.assertEqual(
+                plan.size_packet.build(),
+                bytes.fromhex("FE EA 10 09 6E 00 00 00 04"),
+            )
+            self.assertEqual(plan.chunks[0]["frame_hex"], "FE 24 D0 04 F8 00 07 E0")
 
     def test_wraps_transfer_chunks(self) -> None:
         data = bytes.fromhex("00 F8 E0 07")
