@@ -114,6 +114,13 @@ dafit-open export-watch-faces ble-logs --output exports/watch-faces.json
 dafit-open export-settings ble-logs --output exports/settings.json
 ```
 
+Set basic settings after checking current values:
+
+```bash
+dafit-open set-settings AA:BB:CC:DD:EE:FF --goal-steps 10000 --display-time on --confirm
+dafit-open set-settings AA:BB:CC:DD:EE:FF --dnd 00:00 00:00 --confirm
+```
+
 Export one app-ready state document:
 
 ```bash

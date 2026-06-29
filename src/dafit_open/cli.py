@@ -9,6 +9,7 @@ from .ble_probe import (
     device_info,
     probe,
     scan,
+    set_settings,
     set_watch_face,
     sync_training,
     training_detail,
@@ -102,6 +103,41 @@ def main() -> None:
         help="also send extra read-only watch-face support probes",
     )
     watch_faces_parser.add_argument("--json-out", help="write a structured JSON capture")
+
+    set_settings_parser = subparsers.add_parser(
+        "set-settings",
+        help="set basic watch settings",
+    )
+    set_settings_parser.add_argument("address")
+    set_settings_parser.add_argument("--goal-steps", type=int)
+    set_settings_parser.add_argument("--time-system", type=int, choices=[0, 1])
+    set_settings_parser.add_argument(
+        "--display-time",
+        choices=["on", "off"],
+        help="enable or disable display-time setting",
+    )
+    set_settings_parser.add_argument(
+        "--dnd",
+        nargs=2,
+        metavar=("START", "END"),
+        help="set do-not-disturb period as HH:MM HH:MM",
+    )
+    set_settings_parser.add_argument("--timeout", type=float, default=45.0)
+    set_settings_parser.add_argument("--scan-timeout", type=float, default=10.0)
+    set_settings_parser.add_argument("--retries", type=int, default=3)
+    set_settings_parser.add_argument("--pair", action="store_true")
+    set_settings_parser.add_argument("--direct", action="store_true")
+    set_settings_parser.add_argument(
+        "--no-verify",
+        action="store_true",
+        help="skip settings-basic verification query after writing",
+    )
+    set_settings_parser.add_argument("--json-out", help="write a structured JSON capture")
+    set_settings_parser.add_argument(
+        "--confirm",
+        action="store_true",
+        help="required because this changes watch state",
+    )
 
     training_detail_parser = subparsers.add_parser(
         "training-detail",
@@ -332,6 +368,40 @@ def main() -> None:
                 json_out=args.json_out,
             )
         )
+    elif args.command == "set-settings":
+        if not args.confirm:
+            parser.error("set-settings changes watch state; rerun with --confirm")
+        if (
+            args.goal_steps is None
+            and args.time_system is None
+            and args.display_time is None
+            and args.dnd is None
+        ):
+            parser.error("set-settings requires at least one setting option")
+        dnd = None
+        if args.dnd is not None:
+            try:
+                start_hour, start_minute = _parse_hhmm(args.dnd[0])
+                end_hour, end_minute = _parse_hhmm(args.dnd[1])
+            except argparse.ArgumentTypeError as exc:
+                parser.error(str(exc))
+            dnd = (start_hour, start_minute, end_hour, end_minute)
+        asyncio.run(
+            set_settings(
+                args.address,
+                goal_steps=args.goal_steps,
+                time_system=args.time_system,
+                display_time=None if args.display_time is None else args.display_time == "on",
+                dnd=dnd,
+                timeout=args.timeout,
+                scan_timeout=args.scan_timeout,
+                retries=args.retries,
+                pair=args.pair,
+                direct=args.direct,
+                verify=not args.no_verify,
+                json_out=args.json_out,
+            )
+        )
     elif args.command == "training-detail":
         asyncio.run(
             training_detail(
@@ -412,6 +482,18 @@ def main() -> None:
         write_app_state(state, output=args.output)
     elif args.command == "tui":
         run_capture_tui(args.paths)
+
+
+def _parse_hhmm(value: str) -> tuple[int, int]:
+    try:
+        hour_text, minute_text = value.split(":", 1)
+        hour = int(hour_text)
+        minute = int(minute_text)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"expected HH:MM, got {value!r}") from exc
+    if not 0 <= hour <= 23 or not 0 <= minute <= 59:
+        raise argparse.ArgumentTypeError(f"expected HH:MM within 00:00-23:59, got {value!r}")
+    return hour, minute
 
 
 if __name__ == "__main__":

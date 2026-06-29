@@ -30,14 +30,34 @@ Live FireBoltt 148 result:
 
 ## Packet Builders
 
-Implemented but not automatically sent:
+Implemented by the guarded `set-settings` command:
 
 - Set goal steps: command `0x16`, payload `<steps:uint32-be>`.
 - Set time system: command `0x17`, payload `<0|1>`.
 - Set display-time setting: command `0x18`, payload `<0|1>`.
+- Set DND period: command `0x71`, payload `<start_h> <start_m> <end_h> <end_m>`.
+
+Example that rewrites the FireBoltt 148's already observed values:
+
+```bash
+dafit-open set-settings D3:05:F5:F9:B3:E5 \
+  --time-system 1 --display-time on --dnd 00:00 00:00 --confirm \
+  --json-out ble-logs/fireboltt148-set-settings-same-values.json
+```
+
+Live same-value write result:
+
+- Sent `0x17 01`, `0x18 01`, and `0x71 00 00 00 00`.
+- The watch emitted `0x28 01` after the display-time write.
+- Follow-up `settings-basic` verification still reported goal steps `10000`,
+  time system `1`, display-time enabled, and DND `00:00` to `00:00`.
+- Goal-step writes are implemented but not live-tested yet because the app's
+  setter uses big-endian bytes while the query response reads little-endian.
+
+Implemented as packet builders but not exposed by the settings writer yet:
+
 - Set current time: command `0x31`, payload `<timestamp:uint32-be> 08`.
 - Set timezone: command `0xBB`, payload `07 00 <offset_seconds:int32-le>`.
-- Set DND period: command `0x71`, payload `<start_h> <start_m> <end_h> <end_m>`.
 
 The current-time builder mirrors the app's observed GMT+8-normalized timestamp
 shape. Treat it as experimental until verified against the watch display.
