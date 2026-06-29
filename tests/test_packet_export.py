@@ -45,6 +45,31 @@ class PacketExportTest(unittest.TestCase):
         self.assertEqual(events[1]["direction"], "rx")
         self.assertEqual(events[1]["decoded"], "display_watch_face=5")
 
+    def test_prefers_fresh_decode_over_stored_notification_decode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "capture.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "notifications": [
+                            {
+                                "timestamp": "2026-06-29T10:00:00Z",
+                                "frame": {
+                                    "command": 0x6E,
+                                    "payload_hex": "00 01",
+                                    "hex": "FE EA 20 07 6E 00 01",
+                                    "decoded": "watch_face_background_transfer payload=00 01",
+                                },
+                            }
+                        ],
+                    }
+                )
+            )
+
+            events = load_packet_events([path])
+
+        self.assertEqual(events[0]["decoded"], "watch_face_background_chunk_index index=1")
+
     def test_loads_imported_app_log_frames(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "app-log.json"

@@ -125,7 +125,6 @@ def _notification_event(notification: dict[str, Any], source: Path, order: int) 
         if frame
         else str(frame_data.get("payload_hex") or "")
     )
-    decoded = frame_data.get("decoded")
     event = _event(
         source=source,
         order=order,
@@ -138,8 +137,8 @@ def _notification_event(notification: dict[str, Any], source: Path, order: int) 
         frame_hex=hex_bytes(raw) if raw else str(frame_data.get("hex") or notification.get("hex") or ""),
         frame=frame,
     )
-    if decoded:
-        event["decoded"] = decoded
+    if not event.get("decoded") and frame_data.get("decoded"):
+        event["decoded"] = frame_data["decoded"]
     return event
 
 

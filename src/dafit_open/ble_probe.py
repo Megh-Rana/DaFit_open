@@ -1754,6 +1754,7 @@ async def _upload_original_background_device(
             )
             await asyncio.sleep(0.2)
 
+            pending_notifications: list[bytes] = []
             if negotiated is None:
                 print("negotiating file packet length with cmd=0xBA")
                 await _write_packet_fragmented(
@@ -1765,7 +1766,11 @@ async def _upload_original_background_device(
                     capture,
                     channel="command",
                 )
-                negotiated = await _wait_for_package_length(notification_queue, wait_timeout)
+                negotiated = await _wait_for_package_length(
+                    notification_queue,
+                    wait_timeout,
+                    pending_notifications,
+                )
                 if negotiated is None:
                     negotiated = 64
                     print(f"no package-length response within {wait_timeout:.1f}s; falling back to {negotiated}")
@@ -1792,6 +1797,7 @@ async def _upload_original_background_device(
                 complete,
                 max_chunks,
                 notification_queue,
+                pending_notifications,
                 capture,
                 capture["original_background_transfer"],
             )
@@ -2715,12 +2721,17 @@ async def _transfer_original_background(
     complete: bool,
     max_chunks: int,
     notification_queue: asyncio.Queue[bytes],
+    pending_notifications: list[bytes],
     capture: dict[str, Any],
     upload_record: dict[str, Any],
 ) -> bool:
     chunks_sent = 0
     while True:
-        event = await _wait_for_original_background_event(notification_queue, wait_timeout)
+        event = await _wait_for_original_background_event(
+            notification_queue,
+            wait_timeout,
+            pending_notifications,
+        )
         if event is None:
             print(f"no original background event within {wait_timeout:.1f}s")
             return False
@@ -2877,6 +2888,7 @@ async def _send_original_background_check(
 async def _wait_for_package_length(
     notification_queue: asyncio.Queue[bytes],
     timeout: float,
+    pending_notifications: list[bytes] | None = None,
 ) -> int | None:
     deadline = asyncio.get_running_loop().time() + timeout
     while True:
@@ -2889,6 +2901,8 @@ async def _wait_for_package_length(
             return None
         frame = parse_frame(raw)
         if frame is None or frame.command != 0xBA:
+            if pending_notifications is not None:
+                pending_notifications.append(raw)
             continue
         packet_length = parse_package_length(frame.payload)
         if packet_length is not None:
@@ -2948,16 +2962,20 @@ async def _wait_for_store_watch_face_event(
 async def _wait_for_original_background_event(
     notification_queue: asyncio.Queue[bytes],
     timeout: float,
+    pending_notifications: list[bytes] | None = None,
 ) -> dict[str, Any] | None:
     deadline = asyncio.get_running_loop().time() + timeout
     while True:
         remaining = deadline - asyncio.get_running_loop().time()
         if remaining <= 0:
             return None
-        try:
-            raw = await asyncio.wait_for(notification_queue.get(), timeout=remaining)
-        except TimeoutError:
-            return None
+        if pending_notifications:
+            raw = pending_notifications.pop(0)
+        else:
+            try:
+                raw = await asyncio.wait_for(notification_queue.get(), timeout=remaining)
+            except TimeoutError:
+                return None
         frame = parse_frame(raw)
         if frame is None or frame.command not in {0x6E, 0xB7, 0x74}:
             continue

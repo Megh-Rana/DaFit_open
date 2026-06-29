@@ -282,5 +282,16 @@ dafit-open upload-original-background D3:05:F5:F9:B3:E5 /tmp/dafit-original-bg \
   --json-out ble-logs/fireboltt148-original-background-handshake.json
 ```
 
-Do not run `--complete` until the handshake capture confirms the watch responds
-with a sane offset or chunk-index event for this `0x6E` path.
+FireBoltt 148 live observations:
+
+- After the `0x6E` size packet, the watch responded with
+  `FE EA 20 07 6E 00 00`.
+- This is parsed as `watch_face_background_chunk_index index=0`.
+- Sending one wrapped 64-byte chunk produced the next request:
+  `FE EA 20 07 6E 00 01`.
+- No `0xBA` packet-length response was observed, so the current uploader falls
+  back to the app-compatible 64-byte chunk wrapper.
+- Bounded probes then sent `0x6E FF FF FF FF` to fail/abort cleanly.
+
+Do not run `--complete` until we intentionally choose a real source image and
+are ready to let the watch apply a full custom background.

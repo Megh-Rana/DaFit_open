@@ -480,6 +480,9 @@ def decode_file_transfer_frame(payload: bytes) -> str | None:
 
 def decode_watch_face_background_transfer(payload: bytes) -> str | None:
     payload = bytes(payload)
+    index = parse_store_watch_face_offset(payload)
+    if index is not None:
+        return f"watch_face_background_chunk_index index={index}"
     offset = parse_file_transfer_offset(payload)
     if offset is not None:
         return f"watch_face_background_offset offset={offset}"

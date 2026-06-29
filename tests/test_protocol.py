@@ -209,6 +209,10 @@ class ProtocolDecodeTest(unittest.TestCase):
             "watch_face_background_offset offset=64",
         )
         self.assertEqual(
+            decode_frame(parse_frame(bytes.fromhex("FE EA 20 07 6E 00 01"))),
+            "watch_face_background_chunk_index index=1",
+        )
+        self.assertEqual(
             decode_frame(parse_frame(bytes.fromhex("FE EA 20 0A 6E 02 00 00 76 3D"))),
             "watch_face_background_crc crc=0x763D payload=02 00 00 76 3D",
         )
