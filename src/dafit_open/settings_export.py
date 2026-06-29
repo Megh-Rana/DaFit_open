@@ -14,6 +14,19 @@ def load_settings_state(paths: list[str | Path] | None = None) -> dict[str, Any]
         "time_system": None,
         "display_time_enabled": None,
         "do_not_disturb": None,
+        "dominant_hand": None,
+        "metric_system": None,
+        "display_time": None,
+        "quick_view_enabled": None,
+        "quick_view_time": None,
+        "sedentary_reminder_enabled": None,
+        "sedentary_reminder_period": None,
+        "drink_water_reminder": None,
+        "new_drink_water_reminder": None,
+        "hand_washing_reminder": None,
+        "screen_off_clock_enabled": None,
+        "screen_off_clock_time": None,
+        "tap_to_wake_enabled": None,
         "sources": [],
     }
     for path in _resolve_capture_paths(paths):
@@ -59,6 +72,7 @@ def _merge_settings_payload(
         state["time_system"] = payload[0]
     elif command == 0x28 and payload:
         state["display_time_enabled"] = payload[0] == 1
+        state["quick_view_enabled"] = payload[0] == 1
     elif command == 0x81 and len(payload) >= 4:
         state["do_not_disturb"] = {
             "start_hour": payload[0],
@@ -66,9 +80,88 @@ def _merge_settings_payload(
             "end_hour": payload[2],
             "end_minute": payload[3],
         }
+    elif command == 0x24 and payload:
+        state["dominant_hand"] = payload[0]
+    elif command == 0x2A and payload:
+        state["metric_system"] = payload[0]
+    elif command == 0x2D and payload:
+        state["sedentary_reminder_enabled"] = payload[0] == 1
+    elif command == 0x82 and len(payload) >= 4:
+        state["quick_view_time"] = _period_dict(payload)
+    elif command == 0x83 and len(payload) >= 4:
+        state["sedentary_reminder_period"] = {
+            "period": payload[0],
+            "steps": payload[1],
+            "start_hour": payload[2],
+            "end_hour": payload[3],
+        }
+    elif command == 0x87 and payload:
+        _merge_reminder_period(state, payload)
+    elif command == 0x8D and payload:
+        state["display_time"] = payload[0]
+    elif command == 0xAC and payload:
+        state["tap_to_wake_enabled"] = payload[0] == 1
+    elif command == 0xBB and len(payload) >= 2:
+        _merge_bb_settings(state, payload)
     else:
         return
     _append_source(state, source)
+
+
+def _period_dict(payload: bytes) -> dict[str, int]:
+    return {
+        "start_hour": payload[0],
+        "start_minute": payload[1],
+        "end_hour": payload[2],
+        "end_minute": payload[3],
+    }
+
+
+def _merge_reminder_period(state: dict[str, Any], payload: bytes) -> None:
+    labels = {
+        1: "drink_water_reminder",
+        3: "hand_washing_reminder",
+    }
+    label = labels.get(payload[0])
+    if label is None:
+        return
+    if len(payload) >= 6:
+        state[label] = {
+            "enabled": payload[1] == 1,
+            "start_hour": payload[2],
+            "start_minute": payload[3],
+            "count": payload[4],
+            "period": payload[5],
+        }
+    else:
+        state[label] = {"raw_hex": payload.hex(" ").upper()}
+
+
+def _merge_bb_settings(state: dict[str, Any], payload: bytes) -> None:
+    group = payload[0]
+    subcommand = payload[1]
+    data = payload[2:]
+    if group == 4 and subcommand == 6:
+        if len(data) >= 6:
+            state["new_drink_water_reminder"] = {
+                "enabled": data[1] == 1,
+                "start_hour": data[2],
+                "start_minute": data[3],
+                "count": data[4],
+                "period": data[5],
+            }
+        else:
+            state["new_drink_water_reminder"] = {"raw_hex": payload.hex(" ").upper()}
+    elif group == 12 and subcommand == 0:
+        if data:
+            state["screen_off_clock_enabled"] = data[0] == 1
+        else:
+            state["screen_off_clock_enabled"] = None
+    elif group == 12 and subcommand == 2:
+        if len(data) >= 4:
+            state["screen_off_clock_time"] = _period_dict(data)
+        else:
+            state["screen_off_clock_time"] = {"raw_hex": payload.hex(" ").upper()}
 
 
 def _resolve_capture_paths(paths: list[str | Path] | None) -> list[Path]:

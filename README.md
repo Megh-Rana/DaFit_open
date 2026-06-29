@@ -60,6 +60,7 @@ dafit-open probe AA:BB:CC:DD:EE:FF --query-set health-history
 dafit-open probe AA:BB:CC:DD:EE:FF --query-set health-basic
 dafit-open probe AA:BB:CC:DD:EE:FF --query-set health-extended
 dafit-open probe AA:BB:CC:DD:EE:FF --query-set settings-basic
+dafit-open probe AA:BB:CC:DD:EE:FF --query-set daily-settings
 dafit-open probe AA:BB:CC:DD:EE:FF --query-set alarms
 ```
 
@@ -184,6 +185,7 @@ captures for later analysis.
 - `src/dafit_open/protocol.py`: packet framing and known UUID constants.
 - `src/dafit_open/ble_probe.py`: BLE scan/connect/probe logic.
 - `docs/protocol/alarms.md`: alarm packet notes.
+- `docs/protocol/daily-settings.md`: quick-view/reminder/settings packet notes.
 - `docs/protocol/discovery.md`: current reverse-engineering notes.
 - `docs/protocol/health-sync.md`: health/data sync packet notes.
 - `docs/protocol/settings.md`: settings packet notes.

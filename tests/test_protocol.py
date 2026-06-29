@@ -2,6 +2,7 @@ import unittest
 
 from dafit_open.protocol import (
     AlarmInfo,
+    QUERY_SETS,
     delete_all_new_alarms_packet,
     delete_new_alarm_packet,
     decode_frame,
@@ -156,6 +157,39 @@ class ProtocolDecodeTest(unittest.TestCase):
             decode_frame(parse_frame(bytes.fromhex("FE EA 20 09 81 16 1E 07 00"))),
             "do_not_disturb_time start=22:30 end=07:00 payload=16 1E 07 00",
         )
+        self.assertEqual(
+            decode_frame(parse_frame(bytes.fromhex("FE EA 20 06 28 01"))),
+            "quick_view_enabled=True display_time_enabled=True payload=01",
+        )
+
+    def test_decodes_daily_settings_frames(self) -> None:
+        self.assertEqual(
+            decode_frame(parse_frame(bytes.fromhex("FE EA 20 06 2D 01"))),
+            "sedentary_reminder_enabled=True payload=01",
+        )
+        self.assertEqual(
+            decode_frame(parse_frame(bytes.fromhex("FE EA 20 09 82 08 00 16 00"))),
+            "quick_view_time start=08:00 end=22:00 payload=08 00 16 00",
+        )
+        self.assertEqual(
+            decode_frame(parse_frame(bytes.fromhex("FE EA 20 09 83 3C 32 09 18"))),
+            "sedentary_reminder_period period=60 steps=50 start_hour=9 end_hour=24 payload=3C 32 09 18",
+        )
+        self.assertEqual(
+            decode_frame(parse_frame(bytes.fromhex("FE EA 20 0B 87 01 01 09 00 08 3C"))),
+            "drink_water_reminder enabled=True start=09:00 count=8 period=60 payload=01 01 09 00 08 3C",
+        )
+        self.assertEqual(
+            decode_frame(parse_frame(bytes.fromhex("FE EA 20 0B BB 0C 02 08 00 16 00"))),
+            "screen_off_clock_time start=08:00 end=22:00 payload=0C 02 08 00 16 00",
+        )
+
+    def test_daily_settings_query_set_contains_read_packets(self) -> None:
+        packets = QUERY_SETS["daily-settings"]
+
+        self.assertIn(0x28, [packet.command for packet in packets])
+        self.assertIn(0x83, [packet.command for packet in packets])
+        self.assertIn(0xBB, [packet.command for packet in packets])
 
     def test_parses_alarm_payloads(self) -> None:
         alarms = parse_alarm_list(bytes.fromhex("00 01 02 07 1E 00 00 3E"))

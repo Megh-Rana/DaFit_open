@@ -193,9 +193,16 @@ def decode_frame(frame: Frame) -> str | None:
     if frame.command == 0x27 and frame.payload:
         return f"time_system={frame.payload[0]} payload={hex_bytes(frame.payload)}"
     if frame.command == 0x28 and frame.payload:
-        return f"display_time_enabled={frame.payload[0] == 1} payload={hex_bytes(frame.payload)}"
+        enabled = frame.payload[0] == 1
+        return f"quick_view_enabled={enabled} display_time_enabled={enabled} payload={hex_bytes(frame.payload)}"
+    if frame.command == 0x2A and frame.payload:
+        return f"metric_system={frame.payload[0]} payload={hex_bytes(frame.payload)}"
+    if frame.command == 0x2D and frame.payload:
+        return f"sedentary_reminder_enabled={frame.payload[0] == 1} payload={hex_bytes(frame.payload)}"
     if frame.command == 0x2E and frame.payload:
         return f"device_version={frame.payload[0]}"
+    if frame.command == 0x24 and frame.payload:
+        return f"dominant_hand={frame.payload[0]} payload={hex_bytes(frame.payload)}"
     if frame.command == 0x33:
         return decode_history_step_sleep_marker(frame.payload)
     if frame.command == 0x37:
@@ -218,10 +225,22 @@ def decode_frame(frame: Frame) -> str | None:
         return decode_sleep_time(frame.payload)
     if frame.command == 0xB9:
         return decode_new_alarm_list(frame.payload)
+    if frame.command == 0xBB:
+        return decode_bb_subcommand(frame.payload)
     if frame.command == 0x84:
         return decode_support_watch_faces(frame.payload)
     if frame.command == 0x81:
         return decode_period_time("do_not_disturb_time", frame.payload)
+    if frame.command == 0x82:
+        return decode_period_time("quick_view_time", frame.payload)
+    if frame.command == 0x83:
+        return decode_sedentary_period(frame.payload)
+    if frame.command == 0x87:
+        return decode_reminder_period_group(frame.payload)
+    if frame.command == 0x8D:
+        return decode_single_byte("display_time", frame.payload)
+    if frame.command == 0xAC:
+        return decode_single_byte("tap_to_wake", frame.payload, boolean=True)
     if frame.command == 0xA6:
         slots = decode_watch_face_list(frame.payload)
         if slots is None:
@@ -251,6 +270,70 @@ def decode_period_time(label: str, payload: bytes) -> str | None:
         f"{label} start={payload[0]:02d}:{payload[1]:02d} "
         f"end={payload[2]:02d}:{payload[3]:02d} payload={hex_bytes(payload)}"
     )
+
+
+def decode_single_byte(label: str, payload: bytes, boolean: bool = False) -> str | None:
+    payload = bytes(payload)
+    if not payload:
+        return f"{label}=<empty>"
+    value: int | bool = payload[0] == 1 if boolean else payload[0]
+    return f"{label}={value} payload={hex_bytes(payload)}"
+
+
+def decode_sedentary_period(payload: bytes) -> str | None:
+    payload = bytes(payload)
+    if len(payload) < 4:
+        return f"sedentary_reminder_period payload={hex_bytes(payload)}"
+    return (
+        f"sedentary_reminder_period period={payload[0]} steps={payload[1]} "
+        f"start_hour={payload[2]} end_hour={payload[3]} payload={hex_bytes(payload)}"
+    )
+
+
+def decode_reminder_period_group(payload: bytes) -> str | None:
+    payload = bytes(payload)
+    if not payload:
+        return None
+    labels = {
+        1: "drink_water_reminder",
+        3: "hand_washing_reminder",
+    }
+    label = labels.get(payload[0], f"reminder_group_{payload[0]}")
+    if len(payload) >= 6:
+        return (
+            f"{label} enabled={payload[1] == 1} start={payload[2]:02d}:{payload[3]:02d} "
+            f"count={payload[4]} period={payload[5]} payload={hex_bytes(payload)}"
+        )
+    return f"{label} payload={hex_bytes(payload)}"
+
+
+def decode_bb_subcommand(payload: bytes) -> str | None:
+    payload = bytes(payload)
+    if len(payload) < 2:
+        return f"bb_subcommand payload={hex_bytes(payload)}"
+    group = payload[0]
+    subcommand = payload[1]
+    data = payload[2:]
+    if group == 4 and subcommand == 6:
+        if len(data) >= 6:
+            return (
+                f"new_drink_water_reminder enabled={data[1] == 1} "
+                f"start={data[2]:02d}:{data[3]:02d} count={data[4]} "
+                f"period={data[5]} payload={hex_bytes(payload)}"
+            )
+        return f"new_drink_water_reminder payload={hex_bytes(payload)}"
+    if group == 12 and subcommand == 0:
+        if data:
+            return f"screen_off_clock_enabled={data[0] == 1} payload={hex_bytes(payload)}"
+        return f"screen_off_clock_state payload={hex_bytes(payload)}"
+    if group == 12 and subcommand == 2:
+        if len(data) >= 4:
+            return (
+                f"screen_off_clock_time start={data[0]:02d}:{data[1]:02d} "
+                f"end={data[2]:02d}:{data[3]:02d} payload={hex_bytes(payload)}"
+            )
+        return f"screen_off_clock_time payload={hex_bytes(payload)}"
+    return f"bb_group={group} subcommand={subcommand} payload={hex_bytes(data)}"
 
 
 def decode_alarm_list(payload: bytes) -> str | None:
@@ -825,8 +908,21 @@ QUERY_JIELI_SUPPORT_WATCH_FACE = Packet(0xB4, bytes([0x10]))
 QUERY_HISILICON_SUPPORT_WATCH_FACE = Packet(0xB4, bytes([0x20]))
 QUERY_GOAL_STEP = Packet(0x26)
 QUERY_TIME_SYSTEM = Packet(0x27)
-QUERY_DISPLAY_TIME = Packet(0x28)
+QUERY_QUICK_VIEW = Packet(0x28)
+QUERY_DISPLAY_TIME = QUERY_QUICK_VIEW
+QUERY_DISPLAY_TIME_DURATION = Packet(0x8D)
 QUERY_DO_NOT_DISTURB_TIME = Packet(0x81)
+QUERY_DOMINANT_HAND = Packet(0x24)
+QUERY_METRIC_SYSTEM = Packet(0x2A)
+QUERY_SEDENTARY_REMINDER = Packet(0x2D)
+QUERY_SEDENTARY_REMINDER_PERIOD = Packet(0x83)
+QUERY_QUICK_VIEW_TIME = Packet(0x82)
+QUERY_DRINK_WATER_REMINDER = Packet(0x87, bytes([0x01]))
+QUERY_HAND_WASHING_REMINDER = Packet(0x87, bytes([0x03]))
+QUERY_NEW_DRINK_WATER_REMINDER = Packet(0xBB, bytes([0x04, 0x06, 0x01]))
+QUERY_SCREEN_OFF_CLOCK_STATE = Packet(0xBB, bytes([0x0C, 0x00]))
+QUERY_SCREEN_OFF_CLOCK_TIME = Packet(0xBB, bytes([0x0C, 0x02]))
+QUERY_TAP_TO_WAKE = Packet(0xAC)
 QUERY_ALARMS = Packet(0x21)
 QUERY_NEW_ALARMS = Packet(0xB9, bytes([0x15, 0x04]))
 QUERY_SLEEP_TIME = Packet(0xB8, bytes([0x03]))
@@ -901,6 +997,22 @@ SETTINGS_BASIC_QUERY_PACKETS = [
     QUERY_DO_NOT_DISTURB_TIME,
 ]
 
+DAILY_SETTINGS_QUERY_PACKETS = [
+    QUERY_DOMINANT_HAND,
+    QUERY_METRIC_SYSTEM,
+    QUERY_DISPLAY_TIME_DURATION,
+    QUERY_QUICK_VIEW,
+    QUERY_QUICK_VIEW_TIME,
+    QUERY_SEDENTARY_REMINDER,
+    QUERY_SEDENTARY_REMINDER_PERIOD,
+    QUERY_DRINK_WATER_REMINDER,
+    QUERY_NEW_DRINK_WATER_REMINDER,
+    QUERY_HAND_WASHING_REMINDER,
+    QUERY_SCREEN_OFF_CLOCK_STATE,
+    QUERY_SCREEN_OFF_CLOCK_TIME,
+    QUERY_TAP_TO_WAKE,
+]
+
 ALARM_QUERY_PACKETS = [
     QUERY_ALARMS,
     QUERY_NEW_ALARMS,
@@ -908,6 +1020,7 @@ ALARM_QUERY_PACKETS = [
 
 QUERY_SETS = {
     "alarms": ALARM_QUERY_PACKETS,
+    "daily-settings": DAILY_SETTINGS_QUERY_PACKETS,
     "default": DEFAULT_QUERY_PACKETS,
     "health-basic": HEALTH_BASIC_QUERY_PACKETS,
     "health-extended": HEALTH_EXTENDED_QUERY_PACKETS,

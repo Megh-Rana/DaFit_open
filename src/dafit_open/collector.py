@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .ble_probe import device_info, sync_training, watch_faces
+from .ble_probe import device_info, probe, sync_training, watch_faces
 from .state_export import load_app_state, write_app_state
 
 
@@ -52,6 +52,36 @@ async def collect(
         direct=direct,
         wait_timeout=wait_timeout,
         json_out=str(directory / "watch-faces.json"),
+    )
+    await probe(
+        address,
+        timeout=timeout,
+        scan_timeout=scan_timeout,
+        retries=retries,
+        pair=pair,
+        direct=direct,
+        query_set="settings-basic",
+        json_out=str(directory / "settings-basic.json"),
+    )
+    await probe(
+        address,
+        timeout=timeout,
+        scan_timeout=scan_timeout,
+        retries=retries,
+        pair=pair,
+        direct=direct,
+        query_set="daily-settings",
+        json_out=str(directory / "daily-settings.json"),
+    )
+    await probe(
+        address,
+        timeout=timeout,
+        scan_timeout=scan_timeout,
+        retries=retries,
+        pair=pair,
+        direct=direct,
+        query_set="alarms",
+        json_out=str(directory / "alarms.json"),
     )
     if include_training:
         await sync_training(

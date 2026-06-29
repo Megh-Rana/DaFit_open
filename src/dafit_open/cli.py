@@ -55,6 +55,7 @@ def main() -> None:
         "--query-set",
         choices=[
             "alarms",
+            "daily-settings",
             "default",
             "health-basic",
             "health-extended",
