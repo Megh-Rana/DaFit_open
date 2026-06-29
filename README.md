@@ -237,6 +237,8 @@ Export one app-ready state document:
 
 ```bash
 dafit-open export-state ble-logs --output exports/app-state.json
+dafit-open summary ble-logs
+dafit-open summary ble-logs --json --output exports/app-summary.json
 ```
 
 For Linux/BlueZ connection timeouts, keep the watch awake/nearby and try:

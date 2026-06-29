@@ -293,7 +293,7 @@ def _slot_summary(value: object) -> str:
     for slot in value:
         if not isinstance(slot, dict):
             continue
-        slot_type = str(slot.get("type", "?"))
+        slot_type = str(slot.get("kind") or slot.get("type") or "?")
         counts[slot_type] = counts.get(slot_type, 0) + 1
     by_type = ", ".join(f"{key}:{counts[key]}" for key in sorted(counts))
     return f"{len(value)} ({by_type})" if by_type else str(len(value))
@@ -311,20 +311,21 @@ def _support_summary(value: object) -> str:
 def _count_mapping_values(value: object) -> int:
     if not isinstance(value, dict):
         return 0
-    total = 0
-    for item in value.values():
-        if isinstance(item, dict):
-            total += len(item)
-    return total
+    return sum(1 for key, item in value.items() if key != "sources" and item is not None)
 
 
 def _alarm_summary(value: object) -> str:
     alarms = _dict(value)
-    records = alarms.get("alarms")
-    if isinstance(records, list):
-        enabled = sum(1 for item in records if isinstance(item, dict) and item.get("enabled"))
-        return f"{len(records)} total, {enabled} enabled"
-    return "0 total"
+    legacy = alarms.get("legacy_alarms")
+    new = alarms.get("new_alarms")
+    legacy_records = legacy if isinstance(legacy, list) else []
+    new_records = new if isinstance(new, list) else []
+    enabled = sum(
+        1
+        for item in legacy_records + new_records
+        if isinstance(item, dict) and item.get("enabled")
+    )
+    return f"{len(legacy_records)} legacy, {len(new_records)} new, {enabled} enabled"
 
 
 def _addstr(stdscr: curses.window, y: int, x: int, text: str, attr: int = curses.A_NORMAL) -> None:

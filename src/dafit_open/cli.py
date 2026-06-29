@@ -26,7 +26,12 @@ from .ble_probe import (
 from .collector import collect
 from .capture_export import load_workout_summaries, write_workout_export
 from .settings_export import load_settings_state, write_settings_export
-from .state_export import load_app_state, write_app_state
+from .state_export import (
+    load_app_state,
+    summarize_app_state,
+    write_app_state,
+    write_app_state_summary,
+)
 from .tui import run_capture_tui
 from .watchface_export import load_watch_face_state, write_watch_face_export
 from .watchface_image import (
@@ -664,6 +669,27 @@ def main() -> None:
         help="include workout sample arrays in the exported state",
     )
 
+    summary_parser = subparsers.add_parser(
+        "summary",
+        help="print a compact app-state summary from JSON captures",
+    )
+    summary_parser.add_argument(
+        "paths",
+        nargs="*",
+        help="capture files or directories; defaults to ble-logs/",
+    )
+    summary_parser.add_argument("--output", help="write summary to a file instead of stdout")
+    summary_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="write machine-readable summary JSON",
+    )
+    summary_parser.add_argument(
+        "--include-samples",
+        action="store_true",
+        help="include workout sample arrays before summarizing",
+    )
+
     tui_parser = subparsers.add_parser(
         "tui",
         help="browse captured workout summaries in a terminal UI",
@@ -1125,6 +1151,10 @@ def main() -> None:
     elif args.command == "export-state":
         state = load_app_state(args.paths, include_samples=args.include_samples)
         write_app_state(state, output=args.output)
+    elif args.command == "summary":
+        state = load_app_state(args.paths, include_samples=args.include_samples)
+        summary = summarize_app_state(state)
+        write_app_state_summary(summary, output=args.output, json_output=args.json)
     elif args.command == "tui":
         run_capture_tui(args.paths)
     elif args.command == "import-app-log":

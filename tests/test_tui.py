@@ -62,8 +62,11 @@ class TuiFormattingTest(unittest.TestCase):
                 ],
                 "support": {"display_index": 19719, "supported": [64]},
             },
-            "settings": {"basic": {"goal_steps": 10000}, "daily": {"quick_view": True}},
-            "alarms": {"alarms": [{"enabled": True}, {"enabled": False}]},
+            "settings": {"goal_steps": 10000, "quick_view_enabled": True, "sources": []},
+            "alarms": {
+                "legacy_alarms": [{"enabled": True}],
+                "new_alarms": [{"enabled": False}],
+            },
             "workouts": [{"id": 11}, {"id": 12}],
         }
 
@@ -74,7 +77,7 @@ class TuiFormattingTest(unittest.TestCase):
         self.assertIn("Slots        : 3 (A:1, B:1, C:1)", lines)
         self.assertIn("Support      : display=19719, supported=64", lines)
         self.assertIn("Settings     : 2 value(s)", lines)
-        self.assertIn("Alarms       : 2 total, 1 enabled", lines)
+        self.assertIn("Alarms       : 1 legacy, 1 new, 1 enabled", lines)
         self.assertIn("Workouts     : 2", lines)
 
 

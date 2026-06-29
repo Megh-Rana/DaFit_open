@@ -3,7 +3,11 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from dafit_open.state_export import load_app_state
+from dafit_open.state_export import (
+    format_app_state_summary,
+    load_app_state,
+    summarize_app_state,
+)
 
 
 class StateExportTest(unittest.TestCase):
@@ -25,6 +29,28 @@ class StateExportTest(unittest.TestCase):
         self.assertEqual(state["watch_faces"]["display_slot"], 4)
         self.assertEqual(state["watch_faces"]["slots"][0]["watch_face_id"], 1)
         self.assertEqual(state["workouts"][0]["id"], 11)
+
+    def test_summarizes_app_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            self._write_device_info(directory / "device.json")
+            self._write_protocol_capture(directory / "protocol.json")
+
+            state = load_app_state([directory], include_samples=True)
+            summary = summarize_app_state(state)
+            lines = format_app_state_summary(summary)
+
+        self.assertEqual(summary["schema"], "dafit-open.app-state-summary.v1")
+        self.assertEqual(summary["device"]["name"], "FireBoltt 148")
+        self.assertEqual(summary["device"]["battery_level"], 76)
+        self.assertEqual(summary["watch_faces"]["slot_count"], 1)
+        self.assertEqual(summary["watch_faces"]["slot_types"], {"A": 1})
+        self.assertEqual(summary["settings"]["known_count"], 3)
+        self.assertEqual(summary["alarms"]["legacy_count"], 1)
+        self.assertEqual(summary["alarms"]["enabled_count"], 1)
+        self.assertEqual(summary["workouts"]["count"], 1)
+        self.assertIn("Device       : FireBoltt 148 (AA:BB:CC:DD:EE:FF)", lines)
+        self.assertIn("Watch face   : display=4, slots=1, types=A:1", lines)
 
     def _write_device_info(self, path: Path) -> None:
         capture = {
