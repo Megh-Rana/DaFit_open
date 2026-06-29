@@ -26,6 +26,7 @@ from .ble_probe import (
 from .collector import collect
 from .capture_export import load_workout_summaries, write_workout_export
 from .settings_export import load_settings_state, write_settings_export
+from .packet_export import load_packet_events, write_packet_events
 from .state_export import (
     load_app_state,
     summarize_app_state,
@@ -620,6 +621,18 @@ def main() -> None:
         help="omit sample arrays from JSON output",
     )
 
+    export_packets_parser = subparsers.add_parser(
+        "export-packets",
+        help="export sent/received packet timelines from JSON captures",
+    )
+    export_packets_parser.add_argument(
+        "paths",
+        nargs="*",
+        help="capture files or directories; defaults to ble-logs/",
+    )
+    export_packets_parser.add_argument("--format", choices=["json", "csv"], default="json")
+    export_packets_parser.add_argument("--output", help="write export to a file instead of stdout")
+
     export_faces_parser = subparsers.add_parser(
         "export-watch-faces",
         help="export watch-face state from JSON captures",
@@ -1139,6 +1152,9 @@ def main() -> None:
             output=args.output,
             include_samples=not args.no_samples,
         )
+    elif args.command == "export-packets":
+        events = load_packet_events(args.paths)
+        write_packet_events(events, args.format, output=args.output)
     elif args.command == "export-watch-faces":
         state = load_watch_face_state(args.paths)
         write_watch_face_export(state, output=args.output)
