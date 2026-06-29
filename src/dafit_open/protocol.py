@@ -62,6 +62,28 @@ class Frame:
 
 
 @dataclass(frozen=True)
+class AlarmInfo:
+    id: int
+    enabled: bool
+    hour: int
+    minute: int
+    repeat_mode: int
+    date: str | None = None
+    raw_type: int | None = None
+
+    def to_dict(self) -> dict[str, int | bool | str | None]:
+        return {
+            "id": self.id,
+            "enabled": self.enabled,
+            "hour": self.hour,
+            "minute": self.minute,
+            "repeat_mode": self.repeat_mode,
+            "date": self.date,
+            "raw_type": self.raw_type,
+        }
+
+
+@dataclass(frozen=True)
 class WatchFaceSlot:
     index: int
     kind: str
@@ -162,6 +184,8 @@ def parse_frame(data: bytes) -> Frame | None:
 def decode_frame(frame: Frame) -> str | None:
     if frame.command == 0x19 and frame.payload:
         return f"display_watch_face_set={frame.payload[0]}"
+    if frame.command == 0x21:
+        return decode_alarm_list(frame.payload)
     if frame.command == 0x18 and frame.payload:
         return f"display_time_enabled={frame.payload[0] == 1} payload={hex_bytes(frame.payload)}"
     if frame.command == 0x26:
@@ -192,6 +216,8 @@ def decode_frame(frame: Frame) -> str | None:
         return decode_file_transfer_frame(frame.payload)
     if frame.command == 0xB8:
         return decode_sleep_time(frame.payload)
+    if frame.command == 0xB9:
+        return decode_new_alarm_list(frame.payload)
     if frame.command == 0x84:
         return decode_support_watch_faces(frame.payload)
     if frame.command == 0x81:
@@ -224,6 +250,28 @@ def decode_period_time(label: str, payload: bytes) -> str | None:
     return (
         f"{label} start={payload[0]:02d}:{payload[1]:02d} "
         f"end={payload[2]:02d}:{payload[3]:02d} payload={hex_bytes(payload)}"
+    )
+
+
+def decode_alarm_list(payload: bytes) -> str | None:
+    alarms = parse_alarm_list(payload)
+    if alarms is None:
+        return f"alarm_list payload={hex_bytes(payload)}"
+    return "alarm_list alarms=[" + ", ".join(_alarm_display(alarm) for alarm in alarms) + "]"
+
+
+def decode_new_alarm_list(payload: bytes) -> str | None:
+    alarms = parse_new_alarm_list(payload)
+    if alarms is None:
+        return f"new_alarm_list payload={hex_bytes(payload)}"
+    return "new_alarm_list alarms=[" + ", ".join(_alarm_display(alarm) for alarm in alarms) + "]"
+
+
+def _alarm_display(alarm: AlarmInfo) -> str:
+    date = f" date={alarm.date}" if alarm.date else ""
+    return (
+        f"id={alarm.id} enabled={alarm.enabled} time={alarm.hour:02d}:{alarm.minute:02d} "
+        f"repeat={alarm.repeat_mode}{date}"
     )
 
 
@@ -540,6 +588,62 @@ def parse_watch_face_list(payload: bytes) -> list[WatchFaceSlot] | None:
     return slots
 
 
+def parse_alarm_list(payload: bytes, offset: int = 0, strict_ids: bool = False) -> list[AlarmInfo] | None:
+    payload = bytes(payload)
+    if len(payload) <= offset or (len(payload) - offset) % 8 != 0:
+        return None
+    alarms: list[AlarmInfo] = []
+    for record_offset in range(offset, len(payload), 8):
+        record = payload[record_offset : record_offset + 8]
+        alarm_id = record[0]
+        if not strict_ids and alarm_id == 0:
+            alarm_id = (record_offset - offset) // 8
+        enabled = record[1] == 1
+        raw_type = record[2]
+        hour = record[3]
+        minute = record[4]
+        date_value = (record[5] << 8) + record[6]
+        repeat = record[7]
+        date = None
+        if raw_type == 0:
+            date = _alarm_date(date_value)
+            repeat = 0
+        elif raw_type == 1:
+            repeat = 127
+        alarms.append(
+            AlarmInfo(
+                id=alarm_id,
+                enabled=enabled,
+                hour=hour,
+                minute=minute,
+                repeat_mode=repeat,
+                date=date,
+                raw_type=raw_type,
+            )
+        )
+    return alarms
+
+
+def parse_new_alarm_list(payload: bytes) -> list[AlarmInfo] | None:
+    payload = bytes(payload)
+    if len(payload) == 3 and payload[:2] == bytes([0x15, 0x04]):
+        return []
+    if len(payload) <= 3:
+        return None
+    return parse_alarm_list(payload, offset=3, strict_ids=True)
+
+
+def _alarm_date(value: int) -> str | None:
+    if value == 0:
+        return None
+    year = ((value >> 12) & 0x0F) + 2015
+    month = (value >> 8) & 0x0F
+    day = value & 0xFF
+    if not 1 <= month <= 12 or not 1 <= day <= 31:
+        return None
+    return f"{year:04d}-{month:02d}-{day:02d}"
+
+
 def hex_bytes(data: bytes) -> str:
     return " ".join(f"{byte:02X}" for byte in data)
 
@@ -651,6 +755,8 @@ QUERY_GOAL_STEP = Packet(0x26)
 QUERY_TIME_SYSTEM = Packet(0x27)
 QUERY_DISPLAY_TIME = Packet(0x28)
 QUERY_DO_NOT_DISTURB_TIME = Packet(0x81)
+QUERY_ALARMS = Packet(0x21)
+QUERY_NEW_ALARMS = Packet(0xB9, bytes([0x15, 0x04]))
 QUERY_SLEEP_TIME = Packet(0xB8, bytes([0x03]))
 QUERY_HISTORY_STEP_TODAY = Packet(0x33, bytes([0x00]))
 QUERY_HISTORY_STEP_DETAIL_TODAY = Packet(0xB6, bytes([0x00, 0x00]))
@@ -723,7 +829,13 @@ SETTINGS_BASIC_QUERY_PACKETS = [
     QUERY_DO_NOT_DISTURB_TIME,
 ]
 
+ALARM_QUERY_PACKETS = [
+    QUERY_ALARMS,
+    QUERY_NEW_ALARMS,
+]
+
 QUERY_SETS = {
+    "alarms": ALARM_QUERY_PACKETS,
     "default": DEFAULT_QUERY_PACKETS,
     "health-basic": HEALTH_BASIC_QUERY_PACKETS,
     "health-extended": HEALTH_EXTENDED_QUERY_PACKETS,

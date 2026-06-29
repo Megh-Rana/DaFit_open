@@ -3,7 +3,9 @@ import unittest
 from dafit_open.protocol import (
     decode_frame,
     parse_frame,
+    parse_alarm_list,
     parse_display_watch_face,
+    parse_new_alarm_list,
     parse_support_watch_faces,
     parse_watch_face_screen,
     query_training_detail_packet,
@@ -148,6 +150,26 @@ class ProtocolDecodeTest(unittest.TestCase):
             decode_frame(parse_frame(bytes.fromhex("FE EA 20 09 81 16 1E 07 00"))),
             "do_not_disturb_time start=22:30 end=07:00 payload=16 1E 07 00",
         )
+
+    def test_parses_alarm_payloads(self) -> None:
+        alarms = parse_alarm_list(bytes.fromhex("00 01 02 07 1E 00 00 3E"))
+
+        self.assertIsNotNone(alarms)
+        self.assertEqual(alarms[0].id, 0)
+        self.assertTrue(alarms[0].enabled)
+        self.assertEqual(alarms[0].hour, 7)
+        self.assertEqual(alarms[0].minute, 30)
+        self.assertEqual(alarms[0].repeat_mode, 0x3E)
+        self.assertIsNone(alarms[0].date)
+
+        dated = parse_alarm_list(bytes.fromhex("02 01 00 06 15 B6 1D 00"))
+        self.assertIsNotNone(dated)
+        self.assertEqual(dated[0].date, "2026-06-29")
+
+        new_alarms = parse_new_alarm_list(bytes.fromhex("15 04 01 03 01 01 08 00 00 00 7F"))
+        self.assertIsNotNone(new_alarms)
+        self.assertEqual(new_alarms[0].id, 3)
+        self.assertEqual(new_alarms[0].repeat_mode, 127)
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 
+from .alarm_export import load_alarm_state, write_alarm_export
 from .ble_probe import (
     device_info,
     probe,
@@ -43,6 +44,7 @@ def main() -> None:
     probe_parser.add_argument(
         "--query-set",
         choices=[
+            "alarms",
             "default",
             "health-basic",
             "health-extended",
@@ -285,6 +287,17 @@ def main() -> None:
     )
     export_settings_parser.add_argument("--output", help="write export to a file instead of stdout")
 
+    export_alarms_parser = subparsers.add_parser(
+        "export-alarms",
+        help="export alarm state from JSON captures",
+    )
+    export_alarms_parser.add_argument(
+        "paths",
+        nargs="*",
+        help="capture files or directories; defaults to ble-logs/",
+    )
+    export_alarms_parser.add_argument("--output", help="write export to a file instead of stdout")
+
     export_state_parser = subparsers.add_parser(
         "export-state",
         help="export an app-ready device/watch-face/workout state document",
@@ -477,6 +490,9 @@ def main() -> None:
     elif args.command == "export-settings":
         state = load_settings_state(args.paths)
         write_settings_export(state, output=args.output)
+    elif args.command == "export-alarms":
+        state = load_alarm_state(args.paths)
+        write_alarm_export(state, output=args.output)
     elif args.command == "export-state":
         state = load_app_state(args.paths, include_samples=args.include_samples)
         write_app_state(state, output=args.output)

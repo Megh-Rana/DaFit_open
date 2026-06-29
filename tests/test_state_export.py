@@ -16,6 +16,7 @@ class StateExportTest(unittest.TestCase):
             state = load_app_state([directory])
 
         self.assertEqual(state["schema"], "dafit-open.app-state.v1")
+        self.assertEqual(state["alarms"]["legacy_alarms"][0]["hour"], 7)
         self.assertEqual(state["device"]["address"], "AA:BB:CC:DD:EE:FF")
         self.assertEqual(state["device"]["name"], "FireBoltt 148")
         self.assertEqual(state["device"]["fields"]["battery_level"], 76)
@@ -42,6 +43,7 @@ class StateExportTest(unittest.TestCase):
                 {"frame": {"command": 0x29, "payload_hex": "04"}},
                 {"frame": {"command": 0xA6, "payload_hex": "01 01 00 41 00 01"}},
                 {"frame": {"command": 0x26, "payload_hex": "10 27 00 00"}},
+                {"frame": {"command": 0x21, "payload_hex": "00 01 02 07 1E 00 00 3E"}},
                 {
                     "frame": {
                         "command": 0xB2,

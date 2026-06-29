@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 from typing import Any, TextIO
 
+from .alarm_export import load_alarm_state
 from .capture_export import load_workout_summaries
 from .settings_export import load_settings_state
 from .watchface_export import load_watch_face_state
@@ -33,6 +34,7 @@ def load_app_state(
     capture_paths = _resolve_capture_paths(paths)
     return {
         "schema": "dafit-open.app-state.v1",
+        "alarms": load_alarm_state(capture_paths),
         "device": load_device_profile(capture_paths),
         "settings": load_settings_state(capture_paths),
         "watch_faces": load_watch_face_state(capture_paths),
