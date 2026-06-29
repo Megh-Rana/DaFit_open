@@ -1,0 +1,96 @@
+import json
+import importlib.util
+from pathlib import Path
+import tempfile
+import unittest
+
+from dafit_open.watchface_image import (
+    PixelImage,
+    build_watch_face_package,
+    crp_crc16,
+    load_image,
+    plan_watch_face_transfer,
+    wrap_transfer_chunk,
+)
+
+
+class WatchFaceImageTest(unittest.TestCase):
+    def test_loads_ppm_and_encodes_rgb565(self) -> None:
+        image = PixelImage(
+            width=2,
+            height=1,
+            pixels=[(255, 0, 0), (0, 255, 0)],
+        )
+
+        self.assertEqual(image.to_rgb565("little"), bytes.fromhex("00 F8 E0 07"))
+        self.assertEqual(image.to_rgb565("big"), bytes.fromhex("F8 00 07 E0"))
+
+    def test_builds_watch_face_package_and_transfer_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            source = directory / "source.ppm"
+            source.write_bytes(
+                b"P6\n2 2\n255\n"
+                + bytes(
+                    [
+                        255,
+                        0,
+                        0,
+                        0,
+                        255,
+                        0,
+                        0,
+                        0,
+                        255,
+                        255,
+                        255,
+                        255,
+                    ]
+                )
+            )
+            package = directory / "package"
+
+            manifest = build_watch_face_package(
+                source,
+                package,
+                width=2,
+                height=2,
+                thumb_width=1,
+                thumb_height=1,
+            )
+            plan = plan_watch_face_transfer(package, transfer_type=14)
+
+            self.assertEqual(manifest["schema"], "dafit-open.watch-face-package.v1")
+            self.assertEqual((package / "face.rgb565").read_bytes(), bytes.fromhex("00 F8 E0 07 1F 00 FF FF"))
+            self.assertTrue((package / "preview.ppm").exists())
+            self.assertEqual(plan.prepare_packet.build(), bytes.fromhex("FE EA 10 0B B4 01 0A 00 00 00 02"))
+            self.assertEqual(plan.files[0]["crc16"], "0xBAAE")
+            self.assertEqual(
+                plan.start_packets[0][1].build(),
+                bytes.fromhex("FE EA 10 16 B7 00 0E 08 00 00 00 66 61 63 65 2E 72 67 62 35 36 35"),
+            )
+            saved_manifest = json.loads((package / "manifest.json").read_text())
+            self.assertEqual(saved_manifest["files"][0]["size"], 8)
+
+    def test_wraps_transfer_chunks(self) -> None:
+        data = bytes.fromhex("00 F8 E0 07")
+
+        self.assertEqual(crp_crc16(data), 0x7041)
+        self.assertEqual(wrap_transfer_chunk(data, 256), bytes.fromhex("FE 70 41 04 00 F8 E0 07"))
+        self.assertEqual(wrap_transfer_chunk(data, 64), bytes.fromhex("FF FF 70 41 04 00 F8 E0 07"))
+
+    def test_load_image_reports_pillow_requirement_for_png_without_pillow(self) -> None:
+        if importlib.util.find_spec("PIL") is not None:
+            self.skipTest("Pillow is installed")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "image.png"
+            path.write_bytes(b"not really png")
+
+            try:
+                load_image(path)
+            except RuntimeError as exc:
+                self.assertIn("requires Pillow", str(exc))
+
+
+if __name__ == "__main__":
+    unittest.main()

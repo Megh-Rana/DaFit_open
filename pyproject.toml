@@ -12,6 +12,11 @@ dependencies = [
     "bleak>=0.22",
 ]
 
+[project.optional-dependencies]
+image = [
+    "Pillow>=10",
+]
+
 [project.scripts]
 dafit-open = "dafit_open.cli:main"
 

@@ -91,3 +91,58 @@ Observed transfer type values from helper classes:
 The exact transfer type for FireBoltt 148 store watch faces is still unverified.
 Do not implement full upload until we identify the correct type and capture an
 app transfer or a safe test file.
+
+## Current Python Scaffold
+
+The CLI can now prepare a clean-room local image package and packet plan without
+writing anything to the watch:
+
+```bash
+dafit-open build-watch-face photo.ppm --out-dir watch-face-package
+dafit-open watch-face-transfer-plan watch-face-package --transfer-type 14 --packet-length 256
+dafit-open upload-watch-face D3:05:F5:F9:B3:E5 watch-face-package --dry-run
+```
+
+`build-watch-face` creates:
+
+- `face.rgb565`: resized/cropped main image, raw RGB565, little-endian by default.
+- `thumb.rgb565`: resized/cropped thumbnail.
+- `preview.ppm`: dependency-free preview of the processed main image.
+- `manifest.json`: package metadata, sizes, and SHA-256 hashes.
+
+`watch-face-transfer-plan` creates the currently understood packet sequence:
+
+1. `0xB4 01 <total_size:uint32-le> <file_count:uint8>`
+2. One `0xB7 00 <transfer_type:uint8> <size:uint32-le> <filename>` packet for
+   each transferable file.
+3. Optional wrapped chunk previews when `--packet-length` is provided.
+
+The chunk wrapper matches the decompiled BLE file sender shape:
+
+```text
+FE <crc16:be> <len:uint8> <chunk>
+```
+
+For a negotiated packet length of `64`, the app uses a two-byte prefix:
+
+```text
+FF FF <crc16:be> <len:uint8> <chunk>
+```
+
+The CRC-16 seed is `0xFEEA`, matching the decompiled `com.crrepa.i0.e` helper.
+
+## Manual Confirmation Needed
+
+The guarded `upload-watch-face` command currently refuses real uploads unless
+run with `--dry-run`. This is intentional.
+
+Before enabling the actual BLE write loop, we still need one of:
+
+- A Da Fit BLE capture of a custom photo/watch-face upload on the FireBoltt 148.
+- Confirmation that the watch accepts raw RGB565 files for a selected transfer
+  type, followed by a small, manually supervised test.
+
+The reason is format risk, not packet framing risk: the app appears to use
+vendor-specific watch-face generators/compressors before invoking the generic
+file sender. Sending a wrong-format file should be treated as a state-changing
+experiment, not a normal read-only probe.

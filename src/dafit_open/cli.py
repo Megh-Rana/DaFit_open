@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 
 from .alarm_export import load_alarm_state, write_alarm_export
 from .ble_probe import (
@@ -24,6 +25,11 @@ from .settings_export import load_settings_state, write_settings_export
 from .state_export import load_app_state, write_app_state
 from .tui import run_capture_tui
 from .watchface_export import load_watch_face_state, write_watch_face_export
+from .watchface_image import (
+    build_watch_face_package,
+    plan_watch_face_transfer,
+    write_transfer_plan,
+)
 from .protocol import (
     AlarmInfo,
     Packet,
@@ -116,6 +122,71 @@ def main() -> None:
         help="also send extra read-only watch-face support probes",
     )
     watch_faces_parser.add_argument("--json-out", help="write a structured JSON capture")
+
+    build_face_parser = subparsers.add_parser(
+        "build-watch-face",
+        help="build an experimental local watch-face image package",
+    )
+    build_face_parser.add_argument("image", help="source image; PPM works without extra deps")
+    build_face_parser.add_argument("--out-dir", required=True, help="output package directory")
+    build_face_parser.add_argument("--width", type=int, default=240)
+    build_face_parser.add_argument("--height", type=int, default=240)
+    build_face_parser.add_argument("--thumb-width", type=int, default=80)
+    build_face_parser.add_argument("--thumb-height", type=int, default=80)
+    build_face_parser.add_argument(
+        "--byteorder",
+        choices=["little", "big"],
+        default="little",
+        help="RGB565 byte order for raw package files",
+    )
+
+    face_plan_parser = subparsers.add_parser(
+        "watch-face-transfer-plan",
+        help="print experimental watch-face transfer packet plan",
+    )
+    face_plan_parser.add_argument("package_dir", help="directory from build-watch-face")
+    face_plan_parser.add_argument("--transfer-type", type=int, default=14)
+    face_plan_parser.add_argument(
+        "--packet-length",
+        type=int,
+        help="include wrapped chunk previews for this negotiated file packet length",
+    )
+    face_plan_parser.add_argument("--chunk-preview-count", type=int, default=1)
+    face_plan_parser.add_argument(
+        "--no-thumbnail",
+        action="store_true",
+        help="plan only the main face file",
+    )
+    face_plan_parser.add_argument("--output", help="write plan JSON to a file")
+
+    upload_face_parser = subparsers.add_parser(
+        "upload-watch-face",
+        help="guarded experimental watch-face upload scaffold",
+    )
+    upload_face_parser.add_argument("address")
+    upload_face_parser.add_argument("package_dir", help="directory from build-watch-face")
+    upload_face_parser.add_argument("--transfer-type", type=int, default=14)
+    upload_face_parser.add_argument(
+        "--packet-length",
+        type=int,
+        help="include wrapped chunk previews for this negotiated file packet length",
+    )
+    upload_face_parser.add_argument("--chunk-preview-count", type=int, default=1)
+    upload_face_parser.add_argument(
+        "--no-thumbnail",
+        action="store_true",
+        help="plan/upload only the main face file",
+    )
+    upload_face_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print transfer plan without connecting",
+    )
+    upload_face_parser.add_argument(
+        "--confirm",
+        action="store_true",
+        help="reserved for future real upload support",
+    )
 
     set_settings_parser = subparsers.add_parser(
         "set-settings",
@@ -480,6 +551,55 @@ def main() -> None:
                 extended=args.extended,
                 json_out=args.json_out,
             )
+        )
+    elif args.command == "build-watch-face":
+        try:
+            manifest = build_watch_face_package(
+                args.image,
+                args.out_dir,
+                width=args.width,
+                height=args.height,
+                thumb_width=args.thumb_width,
+                thumb_height=args.thumb_height,
+                byteorder=args.byteorder,
+            )
+        except (RuntimeError, ValueError, OSError) as exc:
+            parser.error(str(exc))
+        print(f"wrote watch-face package: {args.out_dir}")
+        for file_info in manifest["files"]:
+            print(
+                f"  {file_info['role']}: {file_info['path']} "
+                f"{file_info['size']} bytes sha256={file_info['sha256'][:12]}"
+            )
+    elif args.command == "watch-face-transfer-plan":
+        try:
+            plan = plan_watch_face_transfer(
+                args.package_dir,
+                transfer_type=args.transfer_type,
+                include_thumbnail=not args.no_thumbnail,
+                packet_length=args.packet_length,
+                chunk_preview_count=args.chunk_preview_count,
+            )
+        except (ValueError, OSError, json.JSONDecodeError) as exc:
+            parser.error(str(exc))
+        write_transfer_plan(plan, output=args.output)
+    elif args.command == "upload-watch-face":
+        try:
+            plan = plan_watch_face_transfer(
+                args.package_dir,
+                transfer_type=args.transfer_type,
+                include_thumbnail=not args.no_thumbnail,
+                packet_length=args.packet_length,
+                chunk_preview_count=args.chunk_preview_count,
+            )
+        except (ValueError, OSError, json.JSONDecodeError) as exc:
+            parser.error(str(exc))
+        if args.dry_run:
+            write_transfer_plan(plan)
+            return
+        parser.error(
+            "real watch-face upload is intentionally blocked for now; "
+            "run with --dry-run and review the packet plan first"
         )
     elif args.command == "set-settings":
         if not args.confirm:

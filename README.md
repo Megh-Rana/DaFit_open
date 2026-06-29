@@ -85,6 +85,27 @@ Set the active watch-face slot after confirming the slot list:
 dafit-open set-watch-face AA:BB:CC:DD:EE:FF 5 --confirm
 ```
 
+Build an experimental local image package for a future custom watch face:
+
+```bash
+dafit-open build-watch-face photo.ppm --out-dir watch-face-package
+dafit-open watch-face-transfer-plan watch-face-package --transfer-type 14 --packet-length 256
+dafit-open upload-watch-face AA:BB:CC:DD:EE:FF watch-face-package --dry-run
+```
+
+PPM input works without optional dependencies. PNG/JPEG input needs Pillow:
+
+```bash
+pip install -e ".[image]"
+dafit-open build-watch-face photo.png --out-dir watch-face-package
+```
+
+Real image upload is intentionally blocked for now. The current commands build
+raw RGB565 files, generate the observed `0xB4`/`0xB7` transfer packets, and
+preview wrapped file chunks, but the FireBoltt 148's exact custom watch-face
+file format still needs confirmation from an app upload capture or a manually
+approved raw-transfer experiment.
+
 Save structured captures under the ignored `ble-logs/` folder:
 
 ```bash
@@ -184,6 +205,8 @@ captures for later analysis.
 
 - `src/dafit_open/protocol.py`: packet framing and known UUID constants.
 - `src/dafit_open/ble_probe.py`: BLE scan/connect/probe logic.
+- `src/dafit_open/watchface_image.py`: local watch-face image package and
+  transfer-plan helpers.
 - `docs/protocol/alarms.md`: alarm packet notes.
 - `docs/protocol/daily-settings.md`: quick-view/reminder/settings packet notes.
 - `docs/protocol/discovery.md`: current reverse-engineering notes.
