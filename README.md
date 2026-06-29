@@ -101,11 +101,21 @@ pip install -e ".[image]"
 dafit-open build-watch-face photo.png --out-dir watch-face-package
 ```
 
-Real image upload is intentionally blocked for now. The current commands build
-raw RGB565 files, generate the observed `0xB4`/`0xB7` transfer packets, and
-preview wrapped file chunks, but the FireBoltt 148's exact custom watch-face
-file format still needs confirmation from an app upload capture or a manually
-approved raw-transfer experiment.
+Real image upload is guarded behind explicit experimental flags. The current
+commands build raw RGB565 files, generate the observed `0xB4`/`0xB7` transfer
+packets, and can run bounded supervised handshakes:
+
+```bash
+dafit-open upload-watch-face AA:BB:CC:DD:EE:FF watch-face-package \
+  --confirm --experimental-raw --name-mode role --max-chunks 0 \
+  --json-out ble-logs/watch-face-upload-handshake.json
+```
+
+Supervised raw RGB565 handshakes against FireBoltt 148 did not receive
+`0xBA` package-length or `0xB7` file-offset responses for transfer types `14`
+or `11`. The app appears to compress images to an ezip `.bin` payload before
+transfer, so full upload should wait until we can generate that clean-room
+container or capture an app upload.
 
 Save structured captures under the ignored `ble-logs/` folder:
 

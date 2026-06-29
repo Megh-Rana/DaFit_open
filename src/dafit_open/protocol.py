@@ -225,6 +225,8 @@ def decode_frame(frame: Frame) -> str | None:
         return decode_sleep_time(frame.payload)
     if frame.command == 0xB9:
         return decode_new_alarm_list(frame.payload)
+    if frame.command == 0xBA:
+        return decode_package_length(frame.payload)
     if frame.command == 0xBB:
         return decode_bb_subcommand(frame.payload)
     if frame.command == 0x84:
@@ -461,7 +463,22 @@ def decode_file_transfer_frame(payload: bytes) -> str | None:
         size = int.from_bytes(payload[2:6], byteorder="little", signed=False)
         name = payload[6:].decode("utf-8", errors="replace").rstrip("\x00")
         return f"file_transfer_start type={transfer_type} size={size} name={name!r}"
+    if payload[0] == 1 and len(payload) >= 5:
+        offset = int.from_bytes(payload[1:5], byteorder="little", signed=False)
+        return f"file_transfer_offset offset={offset}"
+    if payload[0] == 2:
+        crc = parse_file_transfer_crc(payload)
+        if crc is not None:
+            return f"file_transfer_crc crc=0x{crc:04X} payload={hex_bytes(payload)}"
+        return f"file_transfer_crc payload={hex_bytes(payload)}"
     return f"{labels.get(payload[0], 'file_transfer')} payload={hex_bytes(payload)}"
+
+
+def decode_package_length(payload: bytes) -> str | None:
+    packet_length = parse_package_length(payload)
+    if packet_length is None:
+        return None
+    return f"package_length={packet_length}"
 
 
 def _decode_counted_records(data: bytes, record_size: int, decoder) -> list[str] | None:
@@ -896,7 +913,39 @@ def file_transfer_start_packet(transfer_type: int, size: int, name: str) -> Pack
     return Packet(0xB7, bytes([0x00, transfer_type]) + size.to_bytes(4, "little") + encoded_name)
 
 
+def file_transfer_check_packet(ok: bool) -> Packet:
+    return Packet(0xB7, bytes([0x03 if ok else 0x04]))
+
+
+def file_transfer_abort_packet() -> Packet:
+    return Packet(0xB7, bytes([0x05]))
+
+
+def parse_package_length(payload: bytes) -> int | None:
+    payload = bytes(payload)
+    if len(payload) >= 3 and payload[0] == 0x01:
+        return int.from_bytes(payload[1:3], byteorder="little", signed=False)
+    return None
+
+
+def parse_file_transfer_offset(payload: bytes) -> int | None:
+    payload = bytes(payload)
+    if len(payload) >= 5 and payload[0] == 0x01:
+        return int.from_bytes(payload[1:5], byteorder="little", signed=False)
+    return None
+
+
+def parse_file_transfer_crc(payload: bytes) -> int | None:
+    payload = bytes(payload)
+    if len(payload) >= 5 and payload[0] == 0x02:
+        return int.from_bytes(payload[3:5], byteorder="big", signed=False)
+    if len(payload) >= 3 and payload[0] == 0x02:
+        return int.from_bytes(payload[1:3], byteorder="big", signed=False)
+    return None
+
+
 SET_DISPLAY_WATCH_FACE_COMMAND = 0x19
+QUERY_FILE_TRANSFER_PACKET_LENGTH = Packet(0xBA, bytes([0x01]))
 QUERY_DEVICE_VERSION = Packet(0x2E)
 QUERY_DISPLAY_WATCH_FACE = Packet(0x29)
 QUERY_WATCH_FACE_LIST = Packet(0xA6, bytes([0x01]))

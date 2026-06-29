@@ -7,10 +7,15 @@ from dafit_open.protocol import (
     delete_new_alarm_packet,
     decode_frame,
     encode_alarm_record,
+    file_transfer_abort_packet,
+    file_transfer_check_packet,
     parse_frame,
     parse_alarm_list,
     parse_display_watch_face,
+    parse_file_transfer_crc,
+    parse_file_transfer_offset,
     parse_new_alarm_list,
+    parse_package_length,
     parse_support_watch_faces,
     parse_watch_face_screen,
     query_training_detail_packet,
@@ -131,6 +136,26 @@ class ProtocolDecodeTest(unittest.TestCase):
         self.assertEqual(screen.thumb_width, 80)
         self.assertEqual(screen.thumb_height, 80)
         self.assertEqual(screen.thumb_corner, 8)
+
+    def test_decodes_file_transfer_events(self) -> None:
+        self.assertEqual(parse_package_length(bytes.fromhex("01 00 01")), 256)
+        self.assertEqual(
+            decode_frame(parse_frame(bytes.fromhex("FE EA 20 08 BA 01 00 01"))),
+            "package_length=256",
+        )
+        self.assertEqual(parse_file_transfer_offset(bytes.fromhex("01 34 12 00 00")), 0x1234)
+        self.assertEqual(parse_file_transfer_crc(bytes.fromhex("02 00 00 BA AE")), 0xBAAE)
+        self.assertEqual(
+            decode_frame(parse_frame(bytes.fromhex("FE EA 20 0A B7 01 34 12 00 00"))),
+            "file_transfer_offset offset=4660",
+        )
+        self.assertEqual(
+            decode_frame(parse_frame(bytes.fromhex("FE EA 20 0A B7 02 00 00 BA AE"))),
+            "file_transfer_crc crc=0xBAAE payload=02 00 00 BA AE",
+        )
+        self.assertEqual(file_transfer_check_packet(True).build(), bytes.fromhex("FE EA 10 06 B7 03"))
+        self.assertEqual(file_transfer_check_packet(False).build(), bytes.fromhex("FE EA 10 06 B7 04"))
+        self.assertEqual(file_transfer_abort_packet().build(), bytes.fromhex("FE EA 10 06 B7 05"))
 
     def test_builds_settings_packets(self) -> None:
         self.assertEqual(

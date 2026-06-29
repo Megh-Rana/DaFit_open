@@ -215,7 +215,10 @@ def plan_watch_face_transfer(
     include_thumbnail: bool = True,
     packet_length: int | None = None,
     chunk_preview_count: int = 1,
+    name_mode: str = "path",
 ) -> WatchFacePlan:
+    if name_mode not in {"path", "role"}:
+        raise ValueError("name mode must be 'path' or 'role'")
     package_path = Path(package_dir)
     manifest = load_package_manifest(package_path)
     files = [
@@ -231,6 +234,8 @@ def plan_watch_face_transfer(
     chunks = []
     for file_info in files:
         filename = str(file_info["path"])
+        transfer_name = _transfer_name(file_info, filename, name_mode)
+        file_info["transfer_name"] = transfer_name
         file_path = package_path / filename
         file_data = file_path.read_bytes()
         file_info["crc16"] = f"0x{crp_crc16(file_data):04X}"
@@ -240,7 +245,7 @@ def plan_watch_face_transfer(
                 file_transfer_start_packet(
                     transfer_type,
                     int(file_info["size"]),
-                    Path(filename).name,
+                    transfer_name,
                 ),
             )
         )
@@ -337,6 +342,15 @@ def _file_record(path: Path, role: str) -> dict[str, Any]:
         "size": len(data),
         "sha256": hashlib.sha256(data).hexdigest(),
     }
+
+
+def _transfer_name(file_info: dict[str, Any], filename: str, name_mode: str) -> str:
+    if name_mode == "role":
+        role = str(file_info.get("role") or Path(filename).stem or "file")
+        if role == "thumbnail":
+            role = "thumb"
+        return f"{role[:5]}.bin"
+    return Path(filename).name
 
 
 def _load_ppm(path: Path) -> PixelImage:

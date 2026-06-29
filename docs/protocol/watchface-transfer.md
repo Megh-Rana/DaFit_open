@@ -92,6 +92,32 @@ The exact transfer type for FireBoltt 148 store watch faces is still unverified.
 Do not implement full upload until we identify the correct type and capture an
 app transfer or a safe test file.
 
+## App Image Compression
+
+The photo/video/gallery helpers do not transfer raw pixels. They compress
+Android bitmaps through `com.compress.api.PicZipApi` before invoking `ua.b`.
+
+Observed clean-room facts from decompiled structure:
+
+- `wa.c` splits an Android bitmap into alpha, red, green, and blue channels.
+- Compression parameters use `modeRgb=1`, `modeAlpha=1`, `cmpMode=0`,
+  `tileWidth=8`, `stride=width`, and the bitmap dimensions.
+- `pixelFormat` is `1` for ARGB_8888 and `2` for RGB_565.
+- Expected compressed payload size is computed as:
+
+```text
+((round_up(width, 8) * round_up(height, 4)) * 4 / 8) + 24
+```
+
+- The native libraries include `libnativelib.so` and `libezip.so`; exported
+  strings reference `Java_com_compress_nativelib_NativeLib_CompressInJNI`,
+  `Java_com_sifli_ezip_sifliEzipUtil_png2EzipNDK`, `encode_pixel_data_to_ezip`,
+  and `RGB565`/`RGB888A`/`RGB565A` formats.
+
+The clean-room Python package currently writes raw RGB565 as an intermediate
+format. It does not yet generate the ezip `.bin` payload expected by the app
+helpers.
+
 ## Current Python Scaffold
 
 The CLI can now prepare a clean-room local image package and packet plan without
@@ -135,16 +161,34 @@ The CRC-16 seed is `0xFEEA`, matching the decompiled `com.crrepa.i0.e` helper.
 `inspect-watch-face-package` verifies generated file sizes, SHA-256 hashes, and
 CRC-16 values before a package is handed to any transfer code.
 
-## Manual Confirmation Needed
+## Guarded Uploader
 
-The guarded `upload-watch-face` command currently refuses real uploads unless
-run with `--dry-run`. This is intentional.
+The guarded `upload-watch-face` command can run a supervised experimental raw
+transfer only when both `--confirm` and `--experimental-raw` are provided.
+Without `--complete`, it sends at most `--max-chunks` file chunks and then sends
+`0xB7 05` abort. The default `--max-chunks 0` is a handshake-only probe.
 
-Before enabling the actual BLE write loop, we still need one of:
+Useful bounded probe:
 
-- A Da Fit BLE capture of a custom photo/watch-face upload on the FireBoltt 148.
-- Confirmation that the watch accepts raw RGB565 files for a selected transfer
-  type, followed by a small, manually supervised test.
+```bash
+dafit-open upload-watch-face D3:05:F5:F9:B3:E5 /tmp/dafit-face-package-small \
+  --confirm --experimental-raw --name-mode role --max-chunks 0 \
+  --json-out ble-logs/fireboltt148-upload-handshake-small.json
+```
+
+Supervised FireBoltt 148 results on 2026-06-29:
+
+- Transfer type `14`, filename `face.rgb565`: no `0xBA` package-length response,
+  no `0xB7` offset response after start; abort sent.
+- Transfer type `14`, short filename `face.bin`: same result.
+- Transfer type `11`, short filename `face.bin`: same result.
+
+This suggests format or precondition risk, not just packet framing risk. The
+next required step is either:
+
+- Generate ezip `.bin` payloads clean-room and retry a tiny bounded transfer.
+- Capture an app custom-photo upload and compare packet order, filenames,
+  transfer type, and compressed file bytes.
 
 The reason is format risk, not packet framing risk: the app appears to use
 vendor-specific watch-face generators/compressors before invoking the generic

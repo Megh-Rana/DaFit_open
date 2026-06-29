@@ -83,6 +83,23 @@ class WatchFaceImageTest(unittest.TestCase):
             self.assertFalse(tampered["valid"])
             self.assertFalse(tampered["files"][0]["sha256_ok"])
 
+    def test_transfer_plan_can_use_short_role_names(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            source = directory / "source.ppm"
+            source.write_bytes(b"P6\n1 1\n255\n" + bytes([255, 0, 0]))
+            package = directory / "package"
+            build_watch_face_package(source, package, width=1, height=1, thumb_width=1, thumb_height=1)
+
+            plan = plan_watch_face_transfer(package, transfer_type=14, name_mode="role")
+
+            self.assertEqual(plan.files[0]["transfer_name"], "face.bin")
+            self.assertEqual(plan.files[1]["transfer_name"], "thumb.bin")
+            self.assertEqual(
+                plan.start_packets[0][1].build(),
+                bytes.fromhex("FE EA 10 13 B7 00 0E 02 00 00 00 66 61 63 65 2E 62 69 6E"),
+            )
+
     def test_wraps_transfer_chunks(self) -> None:
         data = bytes.fromhex("00 F8 E0 07")
 

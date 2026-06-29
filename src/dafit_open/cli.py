@@ -16,6 +16,7 @@ from .ble_probe import (
     sync_training,
     training_detail,
     training_series,
+    upload_watch_face_raw,
     watch_faces,
     write_alarm_packets,
 )
@@ -158,6 +159,12 @@ def main() -> None:
         action="store_true",
         help="plan only the main face file",
     )
+    face_plan_parser.add_argument(
+        "--name-mode",
+        choices=["path", "role"],
+        default="path",
+        help="filename to place in B7 start packets",
+    )
     face_plan_parser.add_argument("--output", help="write plan JSON to a file")
 
     inspect_face_parser = subparsers.add_parser(
@@ -172,17 +179,29 @@ def main() -> None:
     )
     upload_face_parser.add_argument("address")
     upload_face_parser.add_argument("package_dir", help="directory from build-watch-face")
+    upload_face_parser.add_argument("--timeout", type=float, default=45.0)
+    upload_face_parser.add_argument("--scan-timeout", type=float, default=10.0)
+    upload_face_parser.add_argument("--retries", type=int, default=1)
+    upload_face_parser.add_argument("--pair", action="store_true")
+    upload_face_parser.add_argument("--direct", action="store_true")
+    upload_face_parser.add_argument("--wait-timeout", type=float, default=8.0)
     upload_face_parser.add_argument("--transfer-type", type=int, default=14)
     upload_face_parser.add_argument(
         "--packet-length",
         type=int,
-        help="include wrapped chunk previews for this negotiated file packet length",
+        help="override negotiated file packet length",
     )
     upload_face_parser.add_argument("--chunk-preview-count", type=int, default=1)
     upload_face_parser.add_argument(
         "--no-thumbnail",
         action="store_true",
         help="plan/upload only the main face file",
+    )
+    upload_face_parser.add_argument(
+        "--name-mode",
+        choices=["path", "role"],
+        default="path",
+        help="filename to place in B7 start packets",
     )
     upload_face_parser.add_argument(
         "--dry-run",
@@ -192,8 +211,25 @@ def main() -> None:
     upload_face_parser.add_argument(
         "--confirm",
         action="store_true",
-        help="reserved for future real upload support",
+        help="allow supervised experimental raw transfer",
     )
+    upload_face_parser.add_argument(
+        "--experimental-raw",
+        action="store_true",
+        help="acknowledge that raw RGB565 upload format is unverified",
+    )
+    upload_face_parser.add_argument(
+        "--max-chunks",
+        type=int,
+        default=0,
+        help="send at most this many file chunks unless --complete is used",
+    )
+    upload_face_parser.add_argument(
+        "--complete",
+        action="store_true",
+        help="stream all chunks requested by the watch",
+    )
+    upload_face_parser.add_argument("--json-out", help="write a structured JSON capture")
 
     set_settings_parser = subparsers.add_parser(
         "set-settings",
@@ -586,6 +622,7 @@ def main() -> None:
                 include_thumbnail=not args.no_thumbnail,
                 packet_length=args.packet_length,
                 chunk_preview_count=args.chunk_preview_count,
+                name_mode=args.name_mode,
             )
         except (ValueError, OSError, json.JSONDecodeError) as exc:
             parser.error(str(exc))
@@ -604,15 +641,36 @@ def main() -> None:
                 include_thumbnail=not args.no_thumbnail,
                 packet_length=args.packet_length,
                 chunk_preview_count=args.chunk_preview_count,
+                name_mode=args.name_mode,
             )
         except (ValueError, OSError, json.JSONDecodeError) as exc:
             parser.error(str(exc))
         if args.dry_run:
             write_transfer_plan(plan)
             return
-        parser.error(
-            "real watch-face upload is intentionally blocked for now; "
-            "run with --dry-run and review the packet plan first"
+        if not args.confirm or not args.experimental_raw:
+            parser.error(
+                "real watch-face upload is experimental and state-changing; "
+                "rerun with --confirm --experimental-raw after reviewing --dry-run"
+            )
+        asyncio.run(
+            upload_watch_face_raw(
+                args.address,
+                args.package_dir,
+                transfer_type=args.transfer_type,
+                packet_length=args.packet_length,
+                include_thumbnail=not args.no_thumbnail,
+                name_mode=args.name_mode,
+                max_chunks=args.max_chunks,
+                complete=args.complete,
+                wait_timeout=args.wait_timeout,
+                timeout=args.timeout,
+                scan_timeout=args.scan_timeout,
+                retries=args.retries,
+                pair=args.pair,
+                direct=args.direct,
+                json_out=args.json_out,
+            )
         )
     elif args.command == "set-settings":
         if not args.confirm:
