@@ -201,6 +201,9 @@ Browse captured workout data in a read-only terminal UI:
 dafit-open tui ble-logs
 ```
 
+On wide terminals the TUI also shows the current app-state summary: device,
+battery, watch-face slots/support, settings, alarms, and workout count.
+
 Export captured watch-face state:
 
 ```bash

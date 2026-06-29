@@ -1,7 +1,7 @@
 import unittest
 
 from dafit_open.capture_export import SeriesData, WorkoutSummary
-from dafit_open.tui import workout_detail_lines, workout_table_rows
+from dafit_open.tui import app_summary_lines, workout_detail_lines, workout_table_rows
 
 
 class TuiFormattingTest(unittest.TestCase):
@@ -45,6 +45,37 @@ class TuiFormattingTest(unittest.TestCase):
         self.assertIn("Valid time   : 1h52m (6732s)", lines)
         self.assertIn("Distance     : 3.77 km (3769 m)", lines)
         self.assertIn("Heart rate   : 2 trimmed, 2 nonzero, 1 chunk(s), complete=True", lines)
+
+    def test_formats_app_summary_lines(self) -> None:
+        state = {
+            "device": {
+                "name": "FireBoltt 148",
+                "address": "D3:05:F5:F9:B3:E5",
+                "fields": {"battery_level": 56},
+            },
+            "watch_faces": {
+                "display_slot": 8,
+                "slots": [
+                    {"index": 0, "type": "A", "id": 1},
+                    {"index": 1, "type": "B", "id": 3299},
+                    {"index": 7, "type": "C", "id": 19719},
+                ],
+                "support": {"display_index": 19719, "supported": [64]},
+            },
+            "settings": {"basic": {"goal_steps": 10000}, "daily": {"quick_view": True}},
+            "alarms": {"alarms": [{"enabled": True}, {"enabled": False}]},
+            "workouts": [{"id": 11}, {"id": 12}],
+        }
+
+        lines = app_summary_lines(state)
+
+        self.assertIn("Name         : FireBoltt 148", lines)
+        self.assertIn("Battery      : 56%", lines)
+        self.assertIn("Slots        : 3 (A:1, B:1, C:1)", lines)
+        self.assertIn("Support      : display=19719, supported=64", lines)
+        self.assertIn("Settings     : 2 value(s)", lines)
+        self.assertIn("Alarms       : 2 total, 1 enabled", lines)
+        self.assertIn("Workouts     : 2", lines)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-"""Read-only terminal UI for browsing captured workout data."""
+"""Read-only terminal UI for browsing captured app/watch data."""
 
 from __future__ import annotations
 
@@ -8,12 +8,44 @@ import textwrap
 from typing import Sequence
 
 from .capture_export import WorkoutSummary, load_workout_summaries
+from .state_export import load_app_state
 
 
 def run_capture_tui(paths: Sequence[str | Path] | None = None) -> None:
     """Open an interactive capture browser."""
-    workouts = load_workout_summaries(list(paths or []))
-    curses.wrapper(_run, workouts, _title(paths))
+    capture_paths = list(paths or [])
+    workouts = load_workout_summaries(capture_paths)
+    app_state = load_app_state(capture_paths)
+    curses.wrapper(_run, workouts, app_state, _title(paths))
+
+
+def app_summary_lines(state: dict[str, object]) -> list[str]:
+    device = _dict(state.get("device"))
+    watch_faces = _dict(state.get("watch_faces"))
+    settings = _dict(state.get("settings"))
+    alarms = _dict(state.get("alarms"))
+    workouts = state.get("workouts")
+    workout_count = len(workouts) if isinstance(workouts, list) else 0
+
+    lines = [
+        "App State",
+        "",
+        "Device",
+        f"Name         : {_value(device.get('name'))}",
+        f"Address      : {_value(device.get('address'))}",
+        f"Battery      : {_battery(device)}",
+        "",
+        "Watch Faces",
+        f"Display      : {_value(watch_faces.get('display_slot'))}",
+        f"Slots        : {_slot_summary(watch_faces.get('slots'))}",
+        f"Support      : {_support_summary(watch_faces.get('support'))}",
+        "",
+        "Captured Data",
+        f"Settings     : {_count_mapping_values(settings)} value(s)",
+        f"Alarms       : {_alarm_summary(alarms)}",
+        f"Workouts     : {workout_count}",
+    ]
+    return lines
 
 
 def workout_table_rows(workouts: Sequence[WorkoutSummary]) -> list[str]:
@@ -62,7 +94,12 @@ def workout_detail_lines(workout: WorkoutSummary) -> list[str]:
     return lines
 
 
-def _run(stdscr: curses.window, workouts: list[WorkoutSummary], title: str) -> None:
+def _run(
+    stdscr: curses.window,
+    workouts: list[WorkoutSummary],
+    app_state: dict[str, object],
+    title: str,
+) -> None:
     curses.curs_set(0)
     stdscr.keypad(True)
     selected = 0
@@ -73,10 +110,11 @@ def _run(stdscr: curses.window, workouts: list[WorkoutSummary], title: str) -> N
         _draw_header(stdscr, width, title, len(workouts))
         if not workouts:
             _addstr(stdscr, 2, 0, "No workout captures found.", curses.A_BOLD)
+            _draw_app_summary(stdscr, app_state, 4, 0, height, width)
         else:
             selected = max(0, min(selected, len(workouts) - 1))
             scroll = _draw_workouts(stdscr, workouts, selected, scroll, height, width)
-            _draw_detail(stdscr, workouts[selected], height, width)
+            _draw_detail(stdscr, workouts[selected], app_state, height, width)
         _draw_footer(stdscr, height, width)
         stdscr.refresh()
 
@@ -135,22 +173,48 @@ def _draw_workouts(
     return scroll
 
 
-def _draw_detail(stdscr: curses.window, workout: WorkoutSummary, height: int, width: int) -> None:
+def _draw_detail(
+    stdscr: curses.window,
+    workout: WorkoutSummary,
+    app_state: dict[str, object],
+    height: int,
+    width: int,
+) -> None:
     if width < 120:
         return
     left = width // 2 + 2
     detail_width = max(20, width - left)
-    for index, line in enumerate(_wrapped_detail(workout, detail_width)):
+    lines = app_summary_lines(app_state) + ["", "Selected Workout", ""] + workout_detail_lines(workout)
+    for index, line in enumerate(_wrapped_lines(lines, detail_width)):
         y = 2 + index
         if y >= height - 1:
             break
-        attr = curses.A_BOLD if index == 0 else curses.A_NORMAL
+        headings = {"App State", "Device", "Watch Faces", "Captured Data", "Selected Workout"}
+        attr = curses.A_BOLD if line in headings else curses.A_NORMAL
         _addstr(stdscr, y, left, line[:detail_width], attr)
 
 
-def _wrapped_detail(workout: WorkoutSummary, width: int) -> list[str]:
+def _draw_app_summary(
+    stdscr: curses.window,
+    app_state: dict[str, object],
+    top: int,
+    left: int,
+    height: int,
+    width: int,
+) -> None:
+    lines = _wrapped_lines(app_summary_lines(app_state), max(20, width - left))
+    for index, line in enumerate(lines):
+        y = top + index
+        if y >= height - 1:
+            break
+        headings = {"App State", "Device", "Watch Faces", "Captured Data"}
+        attr = curses.A_BOLD if line in headings else curses.A_NORMAL
+        _addstr(stdscr, y, left, line[: max(0, width - left)], attr)
+
+
+def _wrapped_lines(raw_lines: Sequence[str], width: int) -> list[str]:
     lines: list[str] = []
-    for line in workout_detail_lines(workout):
+    for line in raw_lines:
         if not line:
             lines.append("")
             continue
@@ -208,6 +272,59 @@ def _series_summary(series: object) -> str:
         f"{len(trimmed)} trimmed, {getattr(series, 'nonzero_count')} nonzero, "
         f"{getattr(series, 'chunks')} chunk(s), complete={getattr(series, 'complete')}"
     )
+
+
+def _dict(value: object) -> dict[str, object]:
+    return value if isinstance(value, dict) else {}
+
+
+def _battery(device: dict[str, object]) -> str:
+    fields = _dict(device.get("fields"))
+    battery = fields.get("battery_level")
+    if battery is None:
+        return "-"
+    return f"{battery}%"
+
+
+def _slot_summary(value: object) -> str:
+    if not isinstance(value, list) or not value:
+        return "-"
+    counts: dict[str, int] = {}
+    for slot in value:
+        if not isinstance(slot, dict):
+            continue
+        slot_type = str(slot.get("type", "?"))
+        counts[slot_type] = counts.get(slot_type, 0) + 1
+    by_type = ", ".join(f"{key}:{counts[key]}" for key in sorted(counts))
+    return f"{len(value)} ({by_type})" if by_type else str(len(value))
+
+
+def _support_summary(value: object) -> str:
+    support = _dict(value)
+    supported = support.get("supported")
+    display = support.get("display_index")
+    if not isinstance(supported, list):
+        return "-"
+    return f"display={_value(display)}, supported={','.join(str(item) for item in supported)}"
+
+
+def _count_mapping_values(value: object) -> int:
+    if not isinstance(value, dict):
+        return 0
+    total = 0
+    for item in value.values():
+        if isinstance(item, dict):
+            total += len(item)
+    return total
+
+
+def _alarm_summary(value: object) -> str:
+    alarms = _dict(value)
+    records = alarms.get("alarms")
+    if isinstance(records, list):
+        enabled = sum(1 for item in records if isinstance(item, dict) and item.get("enabled"))
+        return f"{len(records)} total, {enabled} enabled"
+    return "0 total"
 
 
 def _addstr(stdscr: curses.window, y: int, x: int, text: str, attr: int = curses.A_NORMAL) -> None:
