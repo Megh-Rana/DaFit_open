@@ -117,6 +117,20 @@ or `11`. The app appears to compress images to an ezip `.bin` payload before
 transfer, so full upload should wait until we can generate that clean-room
 container or capture an app upload.
 
+Import Da Fit app logs pulled from Android app storage into a clean-room BLE
+capture. When the app log contains `BleLog` transfer writes, this also rebuilds
+the raw stream that Da Fit sent over `0000fee6`:
+
+```bash
+dafit-open import-app-log ../logs/dafit-android-data/files/moy_logs/2026-06-29/log_16-15-00.txt \
+  --output ble-logs/app-log-watchface-upload.json \
+  --out-dir ble-logs/app-log-watchface-upload
+```
+
+The first captured store-face upload used `/data/user/0/com.crrepa.band.dafit/files/crrepa/band/wf/19719.bin`,
+streamed 576 transfer chunks, and rebuilt a 140,356-byte payload from the app
+log. This gives us a replay/decode target without copying proprietary app code.
+
 Save structured captures under the ignored `ble-logs/` folder:
 
 ```bash

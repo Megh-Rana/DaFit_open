@@ -7,6 +7,7 @@ import asyncio
 import json
 
 from .alarm_export import load_alarm_state, write_alarm_export
+from .app_log_import import import_app_logs, write_imported_app_log
 from .ble_probe import (
     device_info,
     probe,
@@ -538,6 +539,26 @@ def main() -> None:
         help="capture files or directories; defaults to ble-logs/",
     )
 
+    import_app_log_parser = subparsers.add_parser(
+        "import-app-log",
+        help="extract Da Fit app BLE log bytes into a clean-room capture",
+    )
+    import_app_log_parser.add_argument(
+        "paths",
+        nargs="+",
+        help="Da Fit moy_logs files or directories",
+    )
+    import_app_log_parser.add_argument("--output", help="write JSON capture to this file")
+    import_app_log_parser.add_argument(
+        "--out-dir",
+        help="write reconstructed transfer payload files to this directory",
+    )
+    import_app_log_parser.add_argument(
+        "--no-data",
+        action="store_true",
+        help="omit byte hex dumps from JSON; summaries are still included",
+    )
+
     args = parser.parse_args()
     if args.command == "scan":
         asyncio.run(scan(args.timeout, args.verbose))
@@ -858,6 +879,17 @@ def main() -> None:
         write_app_state(state, output=args.output)
     elif args.command == "tui":
         run_capture_tui(args.paths)
+    elif args.command == "import-app-log":
+        capture = import_app_logs(args.paths, include_data=not args.no_data)
+        write_imported_app_log(capture, output=args.output, out_dir=args.out_dir)
+        if args.output or args.out_dir:
+            summary = capture["summary"]
+            print(
+                "imported app log: "
+                f"{summary['events']} events, "
+                f"{summary['transfer_chunks']} transfer chunks, "
+                f"{summary['transfer_payload_size']} transfer bytes"
+            )
 
 
 def _parse_hhmm(value: str) -> tuple[int, int]:
