@@ -99,6 +99,7 @@ writing anything to the watch:
 
 ```bash
 dafit-open build-watch-face photo.ppm --out-dir watch-face-package
+dafit-open inspect-watch-face-package watch-face-package
 dafit-open watch-face-transfer-plan watch-face-package --transfer-type 14 --packet-length 256
 dafit-open upload-watch-face D3:05:F5:F9:B3:E5 watch-face-package --dry-run
 ```
@@ -130,6 +131,9 @@ FF FF <crc16:be> <len:uint8> <chunk>
 ```
 
 The CRC-16 seed is `0xFEEA`, matching the decompiled `com.crrepa.i0.e` helper.
+
+`inspect-watch-face-package` verifies generated file sizes, SHA-256 hashes, and
+CRC-16 values before a package is handed to any transfer code.
 
 ## Manual Confirmation Needed
 

@@ -89,6 +89,7 @@ Build an experimental local image package for a future custom watch face:
 
 ```bash
 dafit-open build-watch-face photo.ppm --out-dir watch-face-package
+dafit-open inspect-watch-face-package watch-face-package
 dafit-open watch-face-transfer-plan watch-face-package --transfer-type 14 --packet-length 256
 dafit-open upload-watch-face AA:BB:CC:DD:EE:FF watch-face-package --dry-run
 ```

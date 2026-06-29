@@ -161,6 +161,54 @@ def load_package_manifest(package_dir: str | Path) -> dict[str, Any]:
     return json.loads(manifest_path.read_text())
 
 
+def inspect_watch_face_package(package_dir: str | Path) -> dict[str, Any]:
+    package_path = Path(package_dir)
+    manifest = load_package_manifest(package_path)
+    files = []
+    valid = True
+    transferable_size = 0
+    transferable_files = 0
+    for file_info in manifest.get("files", []):
+        path = package_path / str(file_info.get("path", ""))
+        record = dict(file_info)
+        record["exists"] = path.exists()
+        if path.exists():
+            data = path.read_bytes()
+            actual_size = len(data)
+            actual_sha = hashlib.sha256(data).hexdigest()
+            record["actual_size"] = actual_size
+            record["actual_sha256"] = actual_sha
+            record["size_ok"] = actual_size == int(file_info.get("size", -1))
+            record["sha256_ok"] = actual_sha == file_info.get("sha256")
+            record["crc16"] = f"0x{crp_crc16(data):04X}"
+            if file_info.get("role") in {"face", "thumbnail"}:
+                transferable_files += 1
+                transferable_size += actual_size
+        else:
+            record["actual_size"] = None
+            record["actual_sha256"] = None
+            record["size_ok"] = False
+            record["sha256_ok"] = False
+            record["crc16"] = None
+        valid = valid and bool(record["exists"] and record["size_ok"] and record["sha256_ok"])
+        files.append(record)
+    valid = valid and bool(files)
+    return {
+        "schema": "dafit-open.watch-face-package-inspection.v1",
+        "package_dir": str(package_path),
+        "valid": valid,
+        "format": manifest.get("format"),
+        "byteorder": manifest.get("byteorder"),
+        "width": manifest.get("width"),
+        "height": manifest.get("height"),
+        "thumb_width": manifest.get("thumb_width"),
+        "thumb_height": manifest.get("thumb_height"),
+        "transferable_files": transferable_files,
+        "transferable_size": transferable_size,
+        "files": files,
+    }
+
+
 def plan_watch_face_transfer(
     package_dir: str | Path,
     transfer_type: int = 14,
@@ -197,6 +245,8 @@ def plan_watch_face_transfer(
             )
         )
         if packet_length is not None:
+            file_info["packet_length"] = packet_length
+            file_info["chunk_count"] = _chunk_count(len(file_data), packet_length)
             for offset in _chunk_offsets(len(file_data), packet_length, chunk_preview_count):
                 chunk_data = file_data[offset : offset + packet_length]
                 chunks.append(
@@ -252,6 +302,8 @@ def wrap_transfer_chunk(data: bytes, packet_length: int) -> bytes:
 
 
 def _chunk_offsets(file_size: int, packet_length: int, preview_count: int) -> list[int]:
+    if packet_length <= 0:
+        raise ValueError(f"packet length out of range: {packet_length}")
     if preview_count <= 0:
         return []
     offsets = []
@@ -261,6 +313,12 @@ def _chunk_offsets(file_size: int, packet_length: int, preview_count: int) -> li
             break
         offsets.append(offset)
     return offsets
+
+
+def _chunk_count(file_size: int, packet_length: int) -> int:
+    if packet_length <= 0:
+        raise ValueError(f"packet length out of range: {packet_length}")
+    return (file_size + packet_length - 1) // packet_length
 
 
 def _packet_dict(packet: Packet) -> dict[str, Any]:

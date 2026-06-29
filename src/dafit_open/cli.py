@@ -27,6 +27,7 @@ from .tui import run_capture_tui
 from .watchface_export import load_watch_face_state, write_watch_face_export
 from .watchface_image import (
     build_watch_face_package,
+    inspect_watch_face_package,
     plan_watch_face_transfer,
     write_transfer_plan,
 )
@@ -158,6 +159,12 @@ def main() -> None:
         help="plan only the main face file",
     )
     face_plan_parser.add_argument("--output", help="write plan JSON to a file")
+
+    inspect_face_parser = subparsers.add_parser(
+        "inspect-watch-face-package",
+        help="validate a generated watch-face image package",
+    )
+    inspect_face_parser.add_argument("package_dir", help="directory from build-watch-face")
 
     upload_face_parser = subparsers.add_parser(
         "upload-watch-face",
@@ -583,6 +590,12 @@ def main() -> None:
         except (ValueError, OSError, json.JSONDecodeError) as exc:
             parser.error(str(exc))
         write_transfer_plan(plan, output=args.output)
+    elif args.command == "inspect-watch-face-package":
+        try:
+            inspection = inspect_watch_face_package(args.package_dir)
+        except (ValueError, OSError, json.JSONDecodeError) as exc:
+            parser.error(str(exc))
+        print(json.dumps(inspection, indent=2, sort_keys=True))
     elif args.command == "upload-watch-face":
         try:
             plan = plan_watch_face_transfer(

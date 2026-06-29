@@ -8,6 +8,7 @@ from dafit_open.watchface_image import (
     PixelImage,
     build_watch_face_package,
     crp_crc16,
+    inspect_watch_face_package,
     load_image,
     plan_watch_face_transfer,
     wrap_transfer_chunk,
@@ -58,19 +59,29 @@ class WatchFaceImageTest(unittest.TestCase):
                 thumb_width=1,
                 thumb_height=1,
             )
-            plan = plan_watch_face_transfer(package, transfer_type=14)
+            inspection = inspect_watch_face_package(package)
+            plan = plan_watch_face_transfer(package, transfer_type=14, packet_length=4)
 
             self.assertEqual(manifest["schema"], "dafit-open.watch-face-package.v1")
             self.assertEqual((package / "face.rgb565").read_bytes(), bytes.fromhex("00 F8 E0 07 1F 00 FF FF"))
             self.assertTrue((package / "preview.ppm").exists())
+            self.assertTrue(inspection["valid"])
+            self.assertEqual(inspection["transferable_size"], 10)
             self.assertEqual(plan.prepare_packet.build(), bytes.fromhex("FE EA 10 0B B4 01 0A 00 00 00 02"))
             self.assertEqual(plan.files[0]["crc16"], "0xBAAE")
+            self.assertEqual(plan.files[0]["chunk_count"], 2)
             self.assertEqual(
                 plan.start_packets[0][1].build(),
                 bytes.fromhex("FE EA 10 16 B7 00 0E 08 00 00 00 66 61 63 65 2E 72 67 62 35 36 35"),
             )
+            self.assertEqual(plan.chunks[0]["frame_hex"], "FE 70 41 04 00 F8 E0 07")
             saved_manifest = json.loads((package / "manifest.json").read_text())
             self.assertEqual(saved_manifest["files"][0]["size"], 8)
+
+            (package / "face.rgb565").write_bytes(b"tampered")
+            tampered = inspect_watch_face_package(package)
+            self.assertFalse(tampered["valid"])
+            self.assertFalse(tampered["files"][0]["sha256_ok"])
 
     def test_wraps_transfer_chunks(self) -> None:
         data = bytes.fromhex("00 F8 E0 07")
