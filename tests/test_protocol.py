@@ -1,7 +1,11 @@
 import unittest
 
 from dafit_open.protocol import (
+    AlarmInfo,
+    delete_all_new_alarms_packet,
+    delete_new_alarm_packet,
     decode_frame,
+    encode_alarm_record,
     parse_frame,
     parse_alarm_list,
     parse_display_watch_face,
@@ -13,6 +17,8 @@ from dafit_open.protocol import (
     set_current_time_packet,
     set_do_not_disturb_time_packet,
     set_goal_steps_packet,
+    set_legacy_alarm_packet,
+    set_new_alarm_packet,
     set_time_system_packet,
     set_timezone_packet,
 )
@@ -170,6 +176,39 @@ class ProtocolDecodeTest(unittest.TestCase):
         self.assertIsNotNone(new_alarms)
         self.assertEqual(new_alarms[0].id, 3)
         self.assertEqual(new_alarms[0].repeat_mode, 127)
+
+    def test_builds_alarm_packets(self) -> None:
+        alarm = AlarmInfo(id=3, enabled=True, hour=8, minute=0, repeat_mode=127)
+
+        self.assertEqual(encode_alarm_record(alarm), bytes.fromhex("03 01 01 08 00 00 00 7F"))
+        self.assertEqual(
+            set_new_alarm_packet(alarm).build(),
+            bytes.fromhex("FE EA 10 0F B9 05 00 03 01 01 08 00 00 00 7F"),
+        )
+        self.assertEqual(
+            set_legacy_alarm_packet(alarm).build(),
+            bytes.fromhex("FE EA 10 0D 11 03 01 01 08 00 00 00 7F"),
+        )
+        self.assertEqual(
+            delete_new_alarm_packet(3).build(),
+            bytes.fromhex("FE EA 10 08 B9 05 02 03"),
+        )
+        self.assertEqual(
+            delete_all_new_alarms_packet().build(),
+            bytes.fromhex("FE EA 10 07 B9 05 03"),
+        )
+
+    def test_builds_dated_alarm_record(self) -> None:
+        alarm = AlarmInfo(
+            id=2,
+            enabled=True,
+            hour=6,
+            minute=21,
+            repeat_mode=99,
+            date="2026-06-29",
+        )
+
+        self.assertEqual(encode_alarm_record(alarm), bytes.fromhex("02 01 00 06 15 B6 1D 00"))
 
 
 if __name__ == "__main__":

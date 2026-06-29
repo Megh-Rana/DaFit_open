@@ -633,6 +633,49 @@ def parse_new_alarm_list(payload: bytes) -> list[AlarmInfo] | None:
     return parse_alarm_list(payload, offset=3, strict_ids=True)
 
 
+def encode_alarm_record(alarm: AlarmInfo) -> bytes:
+    if not 0 <= alarm.id <= 0xFF:
+        raise ValueError(f"alarm id must fit in one byte: {alarm.id}")
+    if not 0 <= alarm.hour <= 23:
+        raise ValueError(f"alarm hour out of range: {alarm.hour}")
+    if not 0 <= alarm.minute <= 59:
+        raise ValueError(f"alarm minute out of range: {alarm.minute}")
+    if not 0 <= alarm.repeat_mode <= 0xFF:
+        raise ValueError(f"alarm repeat mode must fit in one byte: {alarm.repeat_mode}")
+
+    if alarm.date is not None:
+        raw_type = 0
+        date_value = _encode_alarm_date(alarm.date)
+        repeat = 0
+    elif alarm.raw_type is not None:
+        if not 0 <= alarm.raw_type <= 0xFF:
+            raise ValueError(f"alarm raw type must fit in one byte: {alarm.raw_type}")
+        raw_type = alarm.raw_type
+        date_value = 0
+        repeat = alarm.repeat_mode
+    elif alarm.repeat_mode == 127:
+        raw_type = 1
+        date_value = 0
+        repeat = 127
+    else:
+        raw_type = 2
+        date_value = 0
+        repeat = alarm.repeat_mode
+
+    return bytes(
+        [
+            alarm.id,
+            1 if alarm.enabled else 0,
+            raw_type,
+            alarm.hour,
+            alarm.minute,
+            (date_value >> 8) & 0xFF,
+            date_value & 0xFF,
+            repeat,
+        ]
+    )
+
+
 def _alarm_date(value: int) -> str | None:
     if value == 0:
         return None
@@ -642,6 +685,17 @@ def _alarm_date(value: int) -> str | None:
     if not 1 <= month <= 12 or not 1 <= day <= 31:
         return None
     return f"{year:04d}-{month:02d}-{day:02d}"
+
+
+def _encode_alarm_date(value: str) -> int:
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%d")
+    except ValueError as exc:
+        raise ValueError(f"alarm date must be YYYY-MM-DD: {value!r}") from exc
+    year_offset = parsed.year - 2015
+    if not 0 <= year_offset <= 0x0F:
+        raise ValueError(f"alarm date year must be in 2015-2030: {value!r}")
+    return (year_offset << 12) | (parsed.month << 8) | parsed.day
 
 
 def hex_bytes(data: bytes) -> str:
@@ -685,6 +739,24 @@ def set_do_not_disturb_time_packet(
         if not 0 <= value <= limit:
             raise ValueError(f"{label} out of range: {value}")
     return Packet(0x71, bytes([start_hour, start_minute, end_hour, end_minute]))
+
+
+def set_legacy_alarm_packet(alarm: AlarmInfo) -> Packet:
+    return Packet(0x11, encode_alarm_record(alarm))
+
+
+def set_new_alarm_packet(alarm: AlarmInfo) -> Packet:
+    return Packet(0xB9, bytes([0x05, 0x00]) + encode_alarm_record(alarm))
+
+
+def delete_new_alarm_packet(alarm_id: int) -> Packet:
+    if not 0 <= alarm_id <= 0xFF:
+        raise ValueError(f"alarm id must fit in one byte: {alarm_id}")
+    return Packet(0xB9, bytes([0x05, 0x02, alarm_id]))
+
+
+def delete_all_new_alarms_packet() -> Packet:
+    return Packet(0xB9, bytes([0x05, 0x03]))
 
 
 def set_current_time_packet(timestamp: int, timezone_marker: int = 8) -> Packet:

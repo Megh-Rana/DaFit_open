@@ -16,6 +16,7 @@ from .ble_probe import (
     training_detail,
     training_series,
     watch_faces,
+    write_alarm_packets,
 )
 from .collector import collect
 from .capture_export import load_workout_summaries, write_workout_export
@@ -23,6 +24,15 @@ from .settings_export import load_settings_state, write_settings_export
 from .state_export import load_app_state, write_app_state
 from .tui import run_capture_tui
 from .watchface_export import load_watch_face_state, write_watch_face_export
+from .protocol import (
+    AlarmInfo,
+    Packet,
+    delete_all_new_alarms_packet,
+    delete_new_alarm_packet,
+    hex_bytes,
+    set_legacy_alarm_packet,
+    set_new_alarm_packet,
+)
 
 
 def main() -> None:
@@ -136,6 +146,95 @@ def main() -> None:
     )
     set_settings_parser.add_argument("--json-out", help="write a structured JSON capture")
     set_settings_parser.add_argument(
+        "--confirm",
+        action="store_true",
+        help="required because this changes watch state",
+    )
+
+    set_alarm_parser = subparsers.add_parser(
+        "set-alarm",
+        help="create or update an alarm",
+    )
+    set_alarm_parser.add_argument("address")
+    set_alarm_parser.add_argument("--id", type=int, required=True, help="alarm id/slot")
+    set_alarm_parser.add_argument("--time", required=True, help="alarm time as HH:MM")
+    set_alarm_parser.add_argument(
+        "--enabled",
+        choices=["on", "off"],
+        default="on",
+        help="whether the alarm is enabled",
+    )
+    set_alarm_parser.add_argument(
+        "--repeat-mask",
+        type=_parse_byte,
+        default=0,
+        help="repeat mask byte for non-date alarms; 127 means every day",
+    )
+    set_alarm_parser.add_argument(
+        "--date",
+        help="one-shot date as YYYY-MM-DD; valid watch encoding range is 2015-2030",
+    )
+    set_alarm_parser.add_argument(
+        "--everyday",
+        action="store_true",
+        help="shortcut for repeat-mask 127",
+    )
+    set_alarm_parser.add_argument(
+        "--legacy",
+        action="store_true",
+        help="use legacy 0x11 setter instead of new 0xB9 setter",
+    )
+    set_alarm_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print packet bytes without connecting",
+    )
+    set_alarm_parser.add_argument("--timeout", type=float, default=45.0)
+    set_alarm_parser.add_argument("--scan-timeout", type=float, default=10.0)
+    set_alarm_parser.add_argument("--retries", type=int, default=3)
+    set_alarm_parser.add_argument("--pair", action="store_true")
+    set_alarm_parser.add_argument("--direct", action="store_true")
+    set_alarm_parser.add_argument(
+        "--no-verify",
+        action="store_true",
+        help="skip alarms verification query after writing",
+    )
+    set_alarm_parser.add_argument("--json-out", help="write a structured JSON capture")
+    set_alarm_parser.add_argument(
+        "--confirm",
+        action="store_true",
+        help="required because this changes watch state",
+    )
+
+    delete_alarm_parser = subparsers.add_parser(
+        "delete-alarm",
+        help="delete one or all new-format alarms",
+    )
+    delete_alarm_parser.add_argument("address")
+    delete_alarm_group = delete_alarm_parser.add_mutually_exclusive_group(required=True)
+    delete_alarm_group.add_argument("--id", type=int, help="new alarm id to delete")
+    delete_alarm_group.add_argument(
+        "--all",
+        action="store_true",
+        help="delete all new-format alarms",
+    )
+    delete_alarm_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print packet bytes without connecting",
+    )
+    delete_alarm_parser.add_argument("--timeout", type=float, default=45.0)
+    delete_alarm_parser.add_argument("--scan-timeout", type=float, default=10.0)
+    delete_alarm_parser.add_argument("--retries", type=int, default=3)
+    delete_alarm_parser.add_argument("--pair", action="store_true")
+    delete_alarm_parser.add_argument("--direct", action="store_true")
+    delete_alarm_parser.add_argument(
+        "--no-verify",
+        action="store_true",
+        help="skip alarms verification query after writing",
+    )
+    delete_alarm_parser.add_argument("--json-out", help="write a structured JSON capture")
+    delete_alarm_parser.add_argument(
         "--confirm",
         action="store_true",
         help="required because this changes watch state",
@@ -415,6 +514,75 @@ def main() -> None:
                 json_out=args.json_out,
             )
         )
+    elif args.command == "set-alarm":
+        if args.date and args.everyday:
+            parser.error("set-alarm accepts either --date or --everyday, not both")
+        if args.everyday:
+            repeat_mask = 127
+        else:
+            repeat_mask = args.repeat_mask
+        try:
+            hour, minute = _parse_hhmm(args.time)
+            alarm = AlarmInfo(
+                id=args.id,
+                enabled=args.enabled == "on",
+                hour=hour,
+                minute=minute,
+                repeat_mode=repeat_mask,
+                date=args.date,
+            )
+            packet = set_legacy_alarm_packet(alarm) if args.legacy else set_new_alarm_packet(alarm)
+        except (argparse.ArgumentTypeError, ValueError) as exc:
+            parser.error(str(exc))
+        packets = [("set legacy alarm" if args.legacy else "set new alarm", packet)]
+        if args.dry_run:
+            _print_packets(packets)
+            return
+        if not args.confirm:
+            parser.error("set-alarm changes watch state; rerun with --confirm or --dry-run")
+        asyncio.run(
+            write_alarm_packets(
+                args.address,
+                "set-legacy" if args.legacy else "set-new",
+                packets,
+                timeout=args.timeout,
+                scan_timeout=args.scan_timeout,
+                retries=args.retries,
+                pair=args.pair,
+                direct=args.direct,
+                verify=not args.no_verify,
+                json_out=args.json_out,
+            )
+        )
+    elif args.command == "delete-alarm":
+        try:
+            if args.all:
+                packets = [("delete all new alarms", delete_all_new_alarms_packet())]
+                operation = "delete-all-new"
+            else:
+                packets = [(f"delete new alarm id={args.id}", delete_new_alarm_packet(args.id))]
+                operation = "delete-new"
+        except ValueError as exc:
+            parser.error(str(exc))
+        if args.dry_run:
+            _print_packets(packets)
+            return
+        if not args.confirm:
+            parser.error("delete-alarm changes watch state; rerun with --confirm or --dry-run")
+        asyncio.run(
+            write_alarm_packets(
+                args.address,
+                operation,
+                packets,
+                timeout=args.timeout,
+                scan_timeout=args.scan_timeout,
+                retries=args.retries,
+                pair=args.pair,
+                direct=args.direct,
+                verify=not args.no_verify,
+                json_out=args.json_out,
+            )
+        )
     elif args.command == "training-detail":
         asyncio.run(
             training_detail(
@@ -510,6 +678,23 @@ def _parse_hhmm(value: str) -> tuple[int, int]:
     if not 0 <= hour <= 23 or not 0 <= minute <= 59:
         raise argparse.ArgumentTypeError(f"expected HH:MM within 00:00-23:59, got {value!r}")
     return hour, minute
+
+
+def _parse_byte(value: str) -> int:
+    try:
+        parsed = int(value, 0)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"expected byte value, got {value!r}") from exc
+    if not 0 <= parsed <= 0xFF:
+        raise argparse.ArgumentTypeError(f"expected byte value within 0-255, got {value!r}")
+    return parsed
+
+
+def _print_packets(packets: list[tuple[str, Packet]]) -> None:
+    for label, packet in packets:
+        data = packet.build()
+        print(f"{label}: cmd=0x{packet.command:02X} payload={hex_bytes(packet.payload)}")
+        print(f"  frame: {hex_bytes(data)}")
 
 
 if __name__ == "__main__":

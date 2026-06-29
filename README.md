@@ -123,6 +123,20 @@ dafit-open set-settings AA:BB:CC:DD:EE:FF --goal-steps 10000 --display-time on -
 dafit-open set-settings AA:BB:CC:DD:EE:FF --dnd 00:00 00:00 --confirm
 ```
 
+Review alarm write packets before changing the watch:
+
+```bash
+dafit-open set-alarm AA:BB:CC:DD:EE:FF --id 3 --time 08:00 --everyday --dry-run
+dafit-open delete-alarm AA:BB:CC:DD:EE:FF --id 3 --dry-run
+```
+
+Apply alarm changes only after reviewing the packet bytes:
+
+```bash
+dafit-open set-alarm AA:BB:CC:DD:EE:FF --id 3 --time 08:00 --everyday --confirm
+dafit-open delete-alarm AA:BB:CC:DD:EE:FF --id 3 --confirm
+```
+
 Export one app-ready state document:
 
 ```bash
