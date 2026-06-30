@@ -247,7 +247,14 @@ Clean-room observations:
 - FireBoltt 148 layout logs reported `width=466`, `height=466`,
   `thumWidth=280`, and `thumHeight=280`.
 - ORIGINAL pixels are encoded as RGB565 in big-endian byte order.
-- The size packet is `0x6E <size:uint32-be>`.
+- Da Fit avoids the RGB565 value `0x0821` by incrementing it to `0x0822`;
+  `08 21` is also the RLE marker used by the optional compressed encoder.
+- Da Fit sends the normal photo-face layout packet (`cmd=0x38`) before
+  background upload. The payload is time position, top/bottom content,
+  big-endian RGB565 text color, then 32 MD5 nibbles.
+- The size packet is `0x6E <size:uint32-be>`. Current live evidence indicates
+  this size is the number of bytes written to the transfer characteristic,
+  including the per-chunk wrapper, not only raw RGB565 image bytes.
 - Check packets use command `0x6E` with `00 00 00 00` for success and
   `FF FF FF FF` for failure.
 - Data chunks use the same BLE file chunk wrapper as `ua.b`:
@@ -260,10 +267,27 @@ For a 466x466 ORIGINAL background, the raw payload size is:
 466 * 466 * 2 = 434312 bytes
 ```
 
-The expected size packet is:
+With 240-byte raw chunks, each transfer write is `244` bytes
+(`FE <crc16:be> <len:uint8>` plus `240` data bytes). The announced transfer
+size is therefore:
 
 ```text
-FE EA 10 09 6E 00 06 A0 88
+434312 + (1810 * 4) = 441552 bytes
+```
+
+The expected size packet for that plan is:
+
+```text
+FE EA 10 09 6E 00 06 BC D0
+```
+
+The final CRC/status packet also checks the wrapped transfer stream. For the
+current circular-mask test package:
+
+```text
+raw RGB565 CRC:      0x7F27
+wrapped stream CRC:  0x4987
+watch returned CRC:  0x4987
 ```
 
 Dry-run commands:
@@ -294,17 +318,20 @@ FireBoltt 148 live observations:
   148 with MTU payload `244`, that is `240` data bytes:
   `FE <crc16:be> <len:uint8> <240 bytes>`.
 - At 466 x 466 RGB565, the raw payload is fixed at `434312` bytes. The 240-byte
-  fallback gives `1810` expected chunks before check/status, compared with
+  fallback gives `1810` expected raw chunks before check/status, compared with
   `6787` chunks at the original 64-byte fallback.
 - Bounded probes then sent `0x6E FF FF FF FF` to fail/abort cleanly.
 - A full 64-byte fallback attempt reached chunk index `6294` and then returned
   `FE EA 20 09 6E FF FF 00 00`, parsed as CRC/status `0x0000`; this is treated
   as rejection, not success.
 - A full 240-byte fallback attempt reached chunk index `1779` and then returned
-  the same `FE EA 20 09 6E FF FF 00 00` rejection. This is earlier than the
-  expected final chunk index `1809`, so the remaining mismatch is likely the
-  app's cropped/compressed watch-face package format rather than only BLE chunk
-  size.
+  the same `FE EA 20 09 6E FF FF 00 00` rejection. Both failures line up with
+  the point where wrapped transfer bytes crossed the raw `434312` size we had
+  announced. The uploader now announces the wrapped transfer size instead.
+- With wrapped-size announcement, the watch requested the final raw chunk index
+  `1809` and returned CRC `0x4987`, which matches the wrapped transfer stream.
+  The uploader now compares ORIGINAL background CRCs against the wrapped stream
+  rather than the raw RGB565 payload.
 
 The decompiled app photo crop helper uses cover-style scaling and switches to a
 circle crop style for round watch profiles. The CLI can mirror those prep steps:

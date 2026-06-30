@@ -59,9 +59,11 @@ from .protocol import (
     store_watch_face_check_packet,
     store_watch_face_prepare_packet,
     watch_face_background_check_packet,
+    watch_face_layout_packet,
 )
 from .watchface_image import (
     crp_crc16,
+    crp_crc16_wrapped_transfer,
     inspect_watch_face_package,
     plan_original_background_transfer,
     plan_watch_face_transfer,
@@ -673,6 +675,12 @@ async def upload_original_background(
     packet_length: int | None = None,
     max_chunks: int = 0,
     complete: bool = False,
+    send_layout: bool = False,
+    layout_time_position: int = 0,
+    layout_time_top: int = 0,
+    layout_time_bottom: int = 0,
+    layout_text_color: tuple[int, int, int] = (255, 255, 255),
+    layout_background_md5: str = "00000000000000000000000000000000",
     wait_timeout: float = 8.0,
     timeout: float = 45.0,
     scan_timeout: float = 10.0,
@@ -701,6 +709,12 @@ async def upload_original_background(
             "packet_length": packet_length,
             "max_chunks": max_chunks,
             "complete": complete,
+            "send_layout": send_layout,
+            "layout_time_position": layout_time_position,
+            "layout_time_top": layout_time_top,
+            "layout_time_bottom": layout_time_bottom,
+            "layout_text_color": list(layout_text_color),
+            "layout_background_md5": layout_background_md5,
             "wait_timeout": wait_timeout,
             "timeout": timeout,
             "scan_timeout": scan_timeout,
@@ -736,6 +750,12 @@ async def upload_original_background(
                 packet_length,
                 max_chunks,
                 complete,
+                send_layout,
+                layout_time_position,
+                layout_time_top,
+                layout_time_bottom,
+                layout_text_color,
+                layout_background_md5,
                 wait_timeout,
                 timeout,
                 pair=pair,
@@ -1679,6 +1699,12 @@ async def _upload_original_background_device(
     packet_length: int | None,
     max_chunks: int,
     complete: bool,
+    send_layout: bool,
+    layout_time_position: int,
+    layout_time_top: int,
+    layout_time_bottom: int,
+    layout_text_color: tuple[int, int, int],
+    layout_background_md5: str,
     wait_timeout: float,
     timeout: float,
     pair: bool,
@@ -1736,13 +1762,19 @@ async def _upload_original_background_device(
                 return
 
             negotiated = packet_length
+            packet_length_source = "override"
+            if negotiated is None:
+                negotiated = _original_background_fallback_packet_length(gatt_payload)
+                packet_length_source = "mtu_fallback"
             plan = plan_original_background_transfer(
                 package_dir,
-                packet_length=negotiated or 64,
+                packet_length=negotiated,
                 chunk_preview_count=0,
             )
+            capture["original_background_plan"] = plan.to_dict()
             capture["original_background_transfer"] = {
                 "packet_length": negotiated,
+                "packet_length_source": packet_length_source,
                 "gatt_payload": gatt_payload,
                 "complete_requested": complete,
                 "max_chunks": max_chunks,
@@ -1750,6 +1782,40 @@ async def _upload_original_background_device(
                 "events": [],
                 "completed": False,
             }
+
+            if packet_length_source == "mtu_fallback":
+                print(
+                    f"using original-background packet length {negotiated} "
+                    f"from MTU payload {gatt_payload}"
+                )
+
+            if send_layout:
+                layout_packet = watch_face_layout_packet(
+                    layout_time_position,
+                    layout_time_top,
+                    layout_time_bottom,
+                    layout_text_color,
+                    layout_background_md5,
+                )
+                capture["original_background_transfer"]["layout_packet"] = {
+                    "time_position": layout_time_position,
+                    "time_top": layout_time_top,
+                    "time_bottom": layout_time_bottom,
+                    "text_color": list(layout_text_color),
+                    "background_md5": layout_background_md5,
+                    "frame_hex": hex_bytes(layout_packet.build()),
+                }
+                print("sending watch-face layout before background upload")
+                await _write_packet_fragmented(
+                    client,
+                    command_char,
+                    layout_packet,
+                    command_with_response,
+                    gatt_payload,
+                    capture,
+                    channel="command",
+                )
+                await asyncio.sleep(0.3)
 
             print(f"sending original background size={len(file_data)}")
             await _write_packet_fragmented(
@@ -1764,38 +1830,6 @@ async def _upload_original_background_device(
             await asyncio.sleep(0.2)
 
             pending_notifications: list[bytes] = []
-            if negotiated is None:
-                print("negotiating file packet length with cmd=0xBA")
-                await _write_packet_fragmented(
-                    client,
-                    command_char,
-                    QUERY_FILE_TRANSFER_PACKET_LENGTH,
-                    command_with_response,
-                    gatt_payload,
-                    capture,
-                    channel="command",
-                )
-                negotiated = await _wait_for_package_length(
-                    notification_queue,
-                    wait_timeout,
-                    pending_notifications,
-                )
-                if negotiated is None:
-                    negotiated = _original_background_fallback_packet_length(gatt_payload)
-                    print(
-                        f"no package-length response within {wait_timeout:.1f}s; "
-                        f"falling back to {negotiated} from MTU payload {gatt_payload}"
-                    )
-                else:
-                    print(f"negotiated file packet length: {negotiated}")
-                plan = plan_original_background_transfer(
-                    package_dir,
-                    packet_length=negotiated,
-                    chunk_preview_count=0,
-                )
-                capture["original_background_plan"] = plan.to_dict()
-                capture["original_background_transfer"]["packet_length"] = negotiated
-
             completed = await _transfer_original_background(
                 client,
                 command_char,
@@ -2888,11 +2922,11 @@ async def _transfer_original_background(
             upload_record["chunks_sent"] = chunks_sent
             continue
         if event["type"] == "crc":
-            expected = crp_crc16(file_data)
+            expected = crp_crc16_wrapped_transfer(file_data, packet_length)
             received = event.get("crc16")
             ok = received == expected
             print(
-                f"original background CRC received={_format_optional_crc(received)} "
+                f"original background wrapped CRC received={_format_optional_crc(received)} "
                 f"expected=0x{expected:04X} ok={ok}"
             )
             await _send_original_background_check(

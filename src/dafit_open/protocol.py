@@ -972,6 +972,31 @@ def watch_face_background_check_packet(ok: bool) -> Packet:
     return Packet(0x6E, b"\x00\x00\x00\x00" if ok else b"\xFF\xFF\xFF\xFF")
 
 
+def watch_face_layout_packet(
+    time_position: int,
+    time_top_content: int,
+    time_bottom_content: int,
+    text_color: tuple[int, int, int],
+    background_md5: str,
+) -> Packet:
+    if not 0 <= time_position <= 0xFF:
+        raise ValueError(f"time position must fit in one byte: {time_position}")
+    if not 0 <= time_top_content <= 0xFF:
+        raise ValueError(f"time top content must fit in one byte: {time_top_content}")
+    if not 0 <= time_bottom_content <= 0xFF:
+        raise ValueError(f"time bottom content must fit in one byte: {time_bottom_content}")
+    md5 = background_md5.lower()
+    if len(md5) != 32 or any(char not in "0123456789abcdef" for char in md5):
+        raise ValueError("background md5 must be 32 lowercase/uppercase hex characters")
+    red, green, blue = text_color
+    rgb565 = _crp_rgb565(red, green, blue).to_bytes(2, "big")
+    md5_nibbles = bytes(int(char, 16) for char in md5)
+    return Packet(
+        0x38,
+        bytes([time_position, time_top_content, time_bottom_content]) + rgb565 + md5_nibbles,
+    )
+
+
 def store_watch_face_prepare_packet(size: int) -> Packet:
     if not 0 <= size <= 0xFFFFFF:
         raise ValueError(f"store watch-face size must fit in 24 bits: {size}")
@@ -980,6 +1005,14 @@ def store_watch_face_prepare_packet(size: int) -> Packet:
 
 def store_watch_face_check_packet(ok: bool) -> Packet:
     return Packet(0x74, bytes([0x00 if ok else 0x01, 0x00, 0x00, 0x00]))
+
+
+def _crp_rgb565(red: int, green: int, blue: int) -> int:
+    for component in (red, green, blue):
+        if not 0 <= component <= 0xFF:
+            raise ValueError(f"RGB component out of range: {component}")
+    value = ((red >> 3) << 11) + ((green >> 2) << 5) + (blue >> 3)
+    return value + 1 if value == 0x0821 else value
 
 
 def parse_package_length(payload: bytes) -> int | None:

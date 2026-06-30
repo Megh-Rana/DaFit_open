@@ -33,6 +33,7 @@ from dafit_open.protocol import (
     store_watch_face_prepare_packet,
     watch_face_background_check_packet,
     watch_face_background_size_packet,
+    watch_face_layout_packet,
 )
 
 
@@ -219,6 +220,22 @@ class ProtocolDecodeTest(unittest.TestCase):
         self.assertEqual(
             decode_frame(parse_frame(bytes.fromhex("FE EA 20 09 6E FF FF 00 00"))),
             "watch_face_background_crc crc=0x0000 payload=FF FF 00 00",
+        )
+
+    def test_builds_watch_face_layout_packet(self) -> None:
+        self.assertEqual(
+            watch_face_layout_packet(
+                time_position=1,
+                time_top_content=2,
+                time_bottom_content=3,
+                text_color=(255, 255, 255),
+                background_md5="00000000000000000000000000000000",
+            ).build(),
+            bytes.fromhex(
+                "FE EA 10 2A 38 01 02 03 FF FF "
+                "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 "
+                "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+            ),
         )
 
     def test_builds_settings_packets(self) -> None:

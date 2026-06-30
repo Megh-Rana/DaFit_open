@@ -159,7 +159,9 @@ reported the uploaded face as a new type `C` slot afterward.
 
 Build a clean-room custom ORIGINAL background package from an image. This path
 comes from the app's `CompressionType.ORIGINAL` custom-background flow and
-writes a single big-endian RGB565 `background.rgb565` payload:
+writes a single big-endian RGB565 `background.rgb565` payload. The transfer
+plan announces wrapped transfer bytes, because the watch appears to count the
+chunk wrapper bytes as part of the `0x6E` size:
 
 ```bash
 dafit-open build-original-background photo.png --out-dir original-background-package \
@@ -167,6 +169,9 @@ dafit-open build-original-background photo.png --out-dir original-background-pac
 dafit-open original-background-transfer-plan original-background-package --packet-length 240
 dafit-open upload-original-background AA:BB:CC:DD:EE:FF original-background-package --dry-run
 ```
+
+For encoder probes, `build-original-background` also supports
+`--color-order bgr`, `--byteorder little`, and `--scan-order bottom-up`.
 
 The live ORIGINAL uploader is newly reverse engineered, so start with the
 handshake-only mode. It sends the `0x6E` background-size packet, listens for the
@@ -185,6 +190,14 @@ store every transfer payload body:
 dafit-open upload-original-background AA:BB:CC:DD:EE:FF original-background-package \
   --confirm --experimental-original --complete --compact-capture \
   --json-out ble-logs/original-background-compact.json
+```
+
+If the watch shows a distorted image, try the app-style layout packet before
+the upload. Da Fit sends this before the background transfer:
+
+```bash
+dafit-open upload-original-background AA:BB:CC:DD:EE:FF original-background-package \
+  --confirm --experimental-original --complete --send-layout --compact-capture
 ```
 
 Save structured captures under the ignored `ble-logs/` folder:

@@ -94,13 +94,28 @@ class PixelImage:
                 output.append(self.pixels[y * self.width + x] if distance <= radius else background)
         return PixelImage(width=self.width, height=self.height, pixels=output)
 
-    def to_rgb565(self, byteorder: str = "little") -> bytes:
+    def to_rgb565(
+        self,
+        byteorder: str = "little",
+        color_order: str = "rgb",
+        scan_order: str = "top-down",
+    ) -> bytes:
         if byteorder not in {"little", "big"}:
             raise ValueError("rgb565 byteorder must be 'little' or 'big'")
+        if color_order not in {"rgb", "bgr"}:
+            raise ValueError("rgb565 color_order must be 'rgb' or 'bgr'")
+        if scan_order not in {"top-down", "bottom-up"}:
+            raise ValueError("rgb565 scan_order must be 'top-down' or 'bottom-up'")
         data = bytearray()
-        for red, green, blue in self.pixels:
-            value = ((red & 0xF8) << 8) | ((green & 0xFC) << 3) | (blue >> 3)
-            data.extend(value.to_bytes(2, byteorder))
+        rows = range(self.height) if scan_order == "top-down" else range(self.height - 1, -1, -1)
+        for y in rows:
+            row_offset = y * self.width
+            row = self.pixels[row_offset : row_offset + self.width]
+            for red, green, blue in row:
+                if color_order == "bgr":
+                    red, blue = blue, red
+                value = crp_rgb565(red, green, blue)
+                data.extend(value.to_bytes(2, byteorder))
         return bytes(data)
 
     def to_ppm(self) -> bytes:
@@ -151,6 +166,8 @@ class OriginalBackgroundPlan:
     last_chunk_size: int
     wrapped_transfer_size: int
     wrapper_overhead_size: int
+    wrapped_transfer_crc16: int
+    announced_size: int
     payload_sha256: str
     payload_crc16: int
     size_packet: Packet
@@ -168,6 +185,8 @@ class OriginalBackgroundPlan:
             "last_chunk_size": self.last_chunk_size,
             "wrapped_transfer_size": self.wrapped_transfer_size,
             "wrapper_overhead_size": self.wrapper_overhead_size,
+            "wrapped_transfer_crc16": f"0x{self.wrapped_transfer_crc16:04X}",
+            "announced_size": self.announced_size,
             "payload_sha256": self.payload_sha256,
             "payload_crc16": f"0x{self.payload_crc16:04X}",
             "packets": {
@@ -233,6 +252,9 @@ def build_original_background_package(
     height: int = 466,
     fit: str = "cover",
     circular_mask: bool = False,
+    byteorder: str = "big",
+    color_order: str = "rgb",
+    scan_order: str = "top-down",
 ) -> dict[str, Any]:
     source = load_image(image_path)
     face = transform_image(source, width, height, fit)
@@ -243,14 +265,16 @@ def build_original_background_package(
     output.mkdir(parents=True, exist_ok=True)
     payload_path = output / "background.rgb565"
     preview_path = output / "preview.ppm"
-    payload_path.write_bytes(face.to_rgb565("big"))
+    payload_path.write_bytes(face.to_rgb565(byteorder, color_order=color_order, scan_order=scan_order))
     preview_path.write_bytes(face.to_ppm())
 
     manifest = {
         "schema": "dafit-open.original-background-package.v1",
         "source": str(image_path),
         "format": "original-rgb565-background",
-        "byteorder": "big",
+        "byteorder": byteorder,
+        "color_order": color_order,
+        "scan_order": scan_order,
         "fit": fit,
         "circular_mask": circular_mask,
         "width": width,
@@ -369,6 +393,7 @@ def plan_original_background_transfer(
     chunk_count = _chunk_count(len(payload), packet_length)
     last_chunk_size = len(payload) - ((chunk_count - 1) * packet_length) if chunk_count else 0
     wrapper_overhead = _wrapped_chunk_overhead(packet_length)
+    wrapped_transfer_size = len(payload) + (chunk_count * wrapper_overhead)
     chunks = []
     for offset in _chunk_offsets(len(payload), packet_length, chunk_preview_count):
         chunk_data = payload[offset : offset + packet_length]
@@ -387,11 +412,13 @@ def plan_original_background_transfer(
         payload_size=len(payload),
         chunk_count=chunk_count,
         last_chunk_size=last_chunk_size,
-        wrapped_transfer_size=len(payload) + (chunk_count * wrapper_overhead),
+        wrapped_transfer_size=wrapped_transfer_size,
         wrapper_overhead_size=chunk_count * wrapper_overhead,
+        wrapped_transfer_crc16=crp_crc16_wrapped_transfer(payload, packet_length),
+        announced_size=wrapped_transfer_size,
         payload_sha256=hashlib.sha256(payload).hexdigest(),
         payload_crc16=crp_crc16(payload),
-        size_packet=watch_face_background_size_packet(len(payload)),
+        size_packet=watch_face_background_size_packet(wrapped_transfer_size),
         success_packet=watch_face_background_check_packet(True),
         chunks=chunks,
     )
@@ -505,6 +532,24 @@ def wrap_transfer_chunk(data: bytes, packet_length: int) -> bytes:
     if packet_length == 64:
         return bytes([0xFF, 0xFF]) + crc + bytes([len(data) & 0xFF]) + data
     return bytes([0xFE]) + crc + bytes([len(data) & 0xFF]) + data
+
+
+def crp_crc16_wrapped_transfer(data: bytes, packet_length: int) -> int:
+    value = 0xFEEA
+    for offset in range(0, len(data), packet_length):
+        value = crp_crc16(
+            wrap_transfer_chunk(data[offset : offset + packet_length], packet_length),
+            initial=value,
+        )
+    return value
+
+
+def crp_rgb565(red: int, green: int, blue: int) -> int:
+    for component in (red, green, blue):
+        if not 0 <= component <= 0xFF:
+            raise ValueError(f"RGB component out of range: {component}")
+    value = ((red >> 3) << 11) + ((green >> 2) << 5) + (blue >> 3)
+    return value + 1 if value == 0x0821 else value
 
 
 def _chunk_offsets(file_size: int, packet_length: int, preview_count: int) -> list[int]:

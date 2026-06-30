@@ -222,6 +222,9 @@ def main() -> None:
         action="store_true",
         help="black out pixels outside the circular screen preview",
     )
+    original_bg_parser.add_argument("--byteorder", choices=["big", "little"], default="big")
+    original_bg_parser.add_argument("--color-order", choices=["rgb", "bgr"], default="rgb")
+    original_bg_parser.add_argument("--scan-order", choices=["top-down", "bottom-up"], default="top-down")
 
     original_bg_plan_parser = subparsers.add_parser(
         "original-background-transfer-plan",
@@ -265,6 +268,24 @@ def main() -> None:
         "--complete",
         action="store_true",
         help="stream all chunks requested by the watch",
+    )
+    upload_original_bg_parser.add_argument(
+        "--send-layout",
+        action="store_true",
+        help="send Da Fit's photo watch-face layout packet before uploading",
+    )
+    upload_original_bg_parser.add_argument("--layout-time-position", type=int, default=0)
+    upload_original_bg_parser.add_argument("--layout-time-top", type=int, default=0)
+    upload_original_bg_parser.add_argument("--layout-time-bottom", type=int, default=0)
+    upload_original_bg_parser.add_argument(
+        "--layout-text-color",
+        default="#FFFFFF",
+        help="RGB text color, e.g. #FFFFFF",
+    )
+    upload_original_bg_parser.add_argument(
+        "--layout-background-md5",
+        default="00000000000000000000000000000000",
+        help="32 hex chars; Da Fit default is all zeroes",
     )
     upload_original_bg_parser.add_argument(
         "--dry-run",
@@ -883,6 +904,9 @@ def main() -> None:
                 height=args.height,
                 fit=args.fit,
                 circular_mask=args.circular_mask,
+                byteorder=args.byteorder,
+                color_order=args.color_order,
+                scan_order=args.scan_order,
             )
         except (ValueError, OSError, RuntimeError) as exc:
             parser.error(str(exc))
@@ -916,6 +940,10 @@ def main() -> None:
             )
         if args.complete is False and args.max_chunks == 0:
             print("handshake-only mode: will stop after the first transfer event")
+        try:
+            layout_text_color = _parse_rgb(args.layout_text_color)
+        except ValueError as exc:
+            parser.error(str(exc))
         asyncio.run(
             upload_original_background(
                 args.address,
@@ -923,6 +951,12 @@ def main() -> None:
                 packet_length=args.packet_length,
                 max_chunks=args.max_chunks,
                 complete=args.complete,
+                send_layout=args.send_layout,
+                layout_time_position=args.layout_time_position,
+                layout_time_top=args.layout_time_top,
+                layout_time_bottom=args.layout_time_bottom,
+                layout_text_color=layout_text_color,
+                layout_background_md5=args.layout_background_md5,
                 wait_timeout=args.wait_timeout,
                 timeout=args.timeout,
                 scan_timeout=args.scan_timeout,
@@ -1260,6 +1294,19 @@ def _parse_byte(value: str) -> int:
     if not 0 <= parsed <= 0xFF:
         raise argparse.ArgumentTypeError(f"expected byte value within 0-255, got {value!r}")
     return parsed
+
+
+def _parse_rgb(value: str) -> tuple[int, int, int]:
+    text = value.strip()
+    if text.startswith("#"):
+        text = text[1:]
+    if len(text) != 6:
+        raise ValueError(f"expected RGB color like #FFFFFF, got {value!r}")
+    try:
+        raw = bytes.fromhex(text)
+    except ValueError as exc:
+        raise ValueError(f"expected RGB color like #FFFFFF, got {value!r}") from exc
+    return raw[0], raw[1], raw[2]
 
 
 def _print_packets(packets: list[tuple[str, Packet]]) -> None:
